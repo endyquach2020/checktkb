@@ -97,7 +97,8 @@ export function detectConflicts(
   rows: string[][],
   mappings: ColumnMapping[],
   exemptions: ExemptionPair[],
-  extractionSettings: ExtractionSettings
+  extractionSettings: ExtractionSettings,
+  profile?: 'THPT' | 'TieuHoc' | 'All'
 ): TeacherConflict[] {
   const conflicts: TeacherConflict[] = [];
 
@@ -129,7 +130,25 @@ export function detectConflicts(
         day = lastSeenDay;
       }
     } else {
-      day = lastSeenDay;
+      // Auto compute day for active profiles based on the exact row offsets requested
+      if (profile === 'THPT' || profile === 'TieuHoc') {
+        const rowNum = rowIndex + 6; // index 0 matches Excel Row 6 (since rawContentRows starts from row 6)
+        if (rowNum >= 10 && rowNum <= 24) {
+          day = 'Thứ 2';
+        } else if (rowNum >= 28 && rowNum <= 43) {
+          day = 'Thứ 3';
+        } else if (rowNum >= 47 && rowNum <= 62) {
+          day = 'Thứ 4';
+        } else if (rowNum >= 66 && rowNum <= 81) {
+          day = 'Thứ 5';
+        } else if (rowNum >= 85 && rowNum <= 100) {
+          day = 'Thứ 6';
+        } else {
+          day = 'Nghỉ/Trống';
+        }
+      } else {
+        day = lastSeenDay;
+      }
     }
 
     let period = 'Chưa xác định';
@@ -205,80 +224,101 @@ export function generateSampleExcel(): void {
   // Create worksheets
   const wb = XLSX.utils.book_new();
 
-  // Create empty grid representing the spreadsheet rows
+  // Create empty grid representing the spreadsheet rows (at least 105 rows to comfortably fit up to row 100)
   const data: any[][] = [];
-  for (let i = 0; i < 12; i++) {
-    data.push([]);
+  for (let i = 0; i < 105; i++) {
+    data.push(Array(23).fill(''));
   }
 
-  // Row index 0 corresponds to Row 1 in Excel (where headers/class names are placed)
-  data[0] = [
-    '', '', '', // A, B, C empty
-    'Thứ', 'Tiết', // D, E
-    '10.1 TN', '10.1 XH', '11.1 TN', '11.2 XH', '12.1 TN', '12.2 XH', '9.1', '9.2' // F to M
-  ];
-
-  // Row index 4 corresponds to Row 5 in Excel (1-indexed), which is the start of the timetable block
+  // Row index 4 corresponds to Row 5 in Excel (1-indexed), which is the HEADER row containing class names
   data[4] = [
-    '', '', '',
-    'Thứ Hai', 'Tiết 1', 
-    'Toán - Thầy Hải', 'Toán - Thầy Hải', 'Lý - Cô Bình', 'Lý - Cô Vy', 'Văn - Thầy Nam', 'Hóa - Cô Lan', 'Sinh - Cô Tâm', 'Anh - Thầy Minh'
-  ];
-  
-  data[5] = [
-    '', '', '',
-    'Thứ Hai', 'Tiết 2', 
-    'Anh - Cô Mai', 'Anh - Cô Mai', 'Sử - Cô Hương', 'Sử - Cô Hương', 'Địa - Thầy Tuấn', 'Công nghệ - Thầy Bắc', 'Văn - Cô Lan', 'Văn - Cô Lan'
+    '', '', '', '', // A, B, C, D empty
+    'Thời gian Tiểu học', 'Lớp 1A', 'Lớp 2A', 'Lớp 3A', 'Lớp 4A', 'Lớp 5A', // E (4) to J (9) - Tiểu học
+    'Thời gian THPT', 'Lớp 10A1', 'Lớp 10A2', 'Lớp 11A1', 'Lớp 11A2', 'Lớp 12A1', 'Lớp 12A2', 'Lớp 10B1', 'Lớp 10B2', 'Lớp 11B1', 'Lớp 11B2', 'Lớp 12B1' // K (10) to V (21) - THPT
   ];
 
-  data[6] = [
-    '', '', '',
-    'Thứ Hai', 'Tiết 3', 
-    'Văn - Cô Lan', 'Địa - Thầy Tuấn', 'Toán - Thầy Hải', 'Toán - Thầy Hải', 'Sinh - Cô Tâm', 'Sử - Cô Hương', 'Mỹ thuật - Cô Nhã', 'Nhạc - Thầy Sơn'
-  ];
+  // Helper to populate day blocks matching the exact rows:
+  // - Thứ 2: Dòng 9 đến 24 (index 8 đến 23)
+  // - Thứ 3: Dòng 28 đến 43 (index 27 đến 42)
+  // - Thứ 4: Dòng 47 đến 62 (index 46 đến 61)
+  // - Thứ 5: Dòng 66 đến 81 (index 65 đến 80)
+  // - Thứ 6: Dòng 85 đến 100 (index 84 đến 99)
+  const fillDayBlock = (dayName: string, startRowIdx: number, endRowIdx: number) => {
+    for (let rowIdx = startRowIdx; rowIdx <= endRowIdx; rowIdx++) {
+      const slotNum = rowIdx - startRowIdx + 1;
+      
+      // Introduce dynamic teacher assignments with realistic conflicts to show system's accuracy
+      let cls10A1 = `Toán - Thầy Hải`;
+      let cls10A2 = slotNum === 1 ? `Văn - Thầy Hải` : `Văn - Cô Vy`; // Conflict on Monday/Tuesday etc. Tiết 1
+      
+      let cls11A1 = `Lý - Cô Hương`;
+      let cls11A2 = slotNum === 2 ? `Sử - Cô Hương` : `Hóa - Thầy Nam`; // Conflict on Tiết 2
+      
+      let cls1A = `Toán - Cô Vy`;
+      let cls2A = slotNum === 3 ? `Văn - Cô Vy` : `Anh - Cô Vy`; // Conflict on Tiết 3
 
-  data[7] = [
-    '', '', '',
-    'Thứ Ba', 'Tiết 1', 
-    'Sử - Cô Hương', 'Sinh - Cô Vy', 'Hóa - Thầy Sơn', 'Tin - Cô Nhi', 'Sử - Cô Hương', 'Toán - Thầy Hải', 'Địa - Thầy Tuấn', 'Sinh - Cô Vy'
-  ];
+      data[rowIdx] = [
+        '', '', '', '',
+        `${dayName} - Tiết ${slotNum}`, cls1A, cls2A, 'Toán - Thầy Hải', 'Địa - Cô Tâm', 'Mỹ thuật', // E to J (Tiểu học)
+        `${dayName} - Tiết ${slotNum}`, cls10A1, cls10A2, cls11A1, cls11A2, 'Tin học - Cô Nhi', 'Sinh - Thầy Bình', 'GDCD', 'Địa', 'Sử', 'QPAN', 'Sinh hoạt' // K to V (THPT)
+      ];
+    }
+  };
 
-  data[8] = [
-    '', '', '',
-    'Thứ Ba', 'Tiết 2', 
-    'Hóa - Thầy Sơn', 'Anh - Cô Mai', 'Tin - Cô Nhi', 'Tin - Cô Nhi', 'Địa - Thầy Tuấn', 'Văn - Thầy Nam', 'Nhạc - Thầy Sơn', 'Nhạc - Thầy Sơn'
-  ];
+  // Populate Monday (Thứ 2) -> Rows 10-24 (Indices 9-23)
+  fillDayBlock('Thứ 2', 9, 23);
 
-  data[9] = [
-    '', '', '',
-    'Thứ Ba', 'Tiết 3', 
-    'Lý - Cô Vy', 'Sử - Cô Hương', 'Anh - Cô Mai', 'Lý - Cô Vy', 'Hóa - Thầy Sơn', 'Hóa - Thầy Sơn', 'Tin - Thầy Hùng', 'Tin - Thầy Hùng'
-  ];
+  // Populate Tuesday (Thứ 3) -> Rows 28-43 (Indices 27-42)
+  fillDayBlock('Thứ 3', 27, 42);
+
+  // Populate Wednesday (Thứ 4) -> Rows 47-62 (Indices 46-61)
+  fillDayBlock('Thứ 4', 46, 61);
+
+  // Populate Thursday (Thứ 5) -> Rows 66-81 (Indices 65-80)
+  fillDayBlock('Thứ 5', 65, 80);
+
+  // Populate Friday (Thứ 6) -> Rows 85-100 (Indices 84-99)
+  fillDayBlock('Thứ 6', 84, 99);
+
+  // Set visual separating tags for the spacing rows (optional but makes it extremely easy to read)
+  data[24][4] = '--- NGHỈ TRƯA ---'; data[24][10] = '--- NGHỈ TRƯA ---';
+  data[43][4] = '--- NGHỈ TRƯA ---'; data[43][10] = '--- NGHỈ TRƯA ---';
+  data[62][4] = '--- NGHỈ TRƯA ---'; data[62][10] = '--- NGHỈ TRƯA ---';
+  data[81][4] = '--- NGHỈ TRƯA ---'; data[81][10] = '--- NGHỈ TRƯA ---';
 
   const ws = XLSX.utils.aoa_to_sheet(data);
 
-  // Set column widths
+  // Set column widths for high legibility
   const wscols = [
     { wch: 5 },  // A
     { wch: 5 },  // B
     { wch: 5 },  // C
-    { wch: 12 }, // D
-    { wch: 10 }, // E
-    { wch: 18 }, // F: 10.1 TN
-    { wch: 18 }, // G: 10.1 XH
-    { wch: 18 }, // H: 11.1 TN
-    { wch: 18 }, // I: 11.2 XH
-    { wch: 18 }, // J: 12.1 TN
-    { wch: 18 }, // K: 12.2 XH
-    { wch: 18 }, // L: 9.1
-    { wch: 18 }, // M: 9.2
+    { wch: 5 },  // D
+    { wch: 20 }, // E: Thời gian Tiểu học
+    { wch: 18 }, // F: Lớp 1A
+    { wch: 18 }, // G: Lớp 2A
+    { wch: 18 }, // H: Lớp 3A
+    { wch: 18 }, // I: Lớp 4A
+    { wch: 18 }, // J: Lớp 5A
+    { wch: 20 }, // K: Thời gian THPT
+    { wch: 18 }, // L: Lớp 10A1
+    { wch: 18 }, // M: Lớp 10A2
+    { wch: 18 }, // N: Lớp 11A1
+    { wch: 18 }, // O: Lớp 11A2
+    { wch: 18 }, // P: Lớp 12A1
+    { wch: 18 }, // Q: Lớp 12A2
+    { wch: 18 }, // R: Lớp 10B1
+    { wch: 18 }, // S: Lớp 10B2
+    { wch: 18 }, // T: Lớp 11B1
+    { wch: 18 }, // U: Lớp 11B2
+    { wch: 18 }, // V: Lớp 12B1
   ];
   ws['!cols'] = wscols;
 
   XLSX.utils.book_append_sheet(wb, ws, 'Thời khóa biểu mẫu');
 
   // Trigger download
-  XLSX.writeFile(wb, 'thoi_khoa_bieu_mau_trung_lich.xlsx');
+  XLSX.writeFile(wb, 'thoi_khoa_bieu_mau_dong5.xlsx');
 }
 
 /**

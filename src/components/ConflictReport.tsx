@@ -40,6 +40,21 @@ const formatClassName = (className: string): string => {
   return `Lớp ${trimmed}`;
 };
 
+// Helper to strip trailing "TN" and "XH" (case-insensitive) for name base comparison
+const cleanClassBase = (clsName: string): string => {
+  if (!clsName) return '';
+  let cleaned = clsName.trim().replace(/^(lớp|lop)\s*/i, '').trim();
+  // Strip trailing "TN" or "XH" (case-insensitive)
+  cleaned = cleaned.replace(/\s*(tn|xh)$/i, '').trim();
+  return cleaned;
+};
+
+// Check if a class has a matching base name in a list of classes
+const hasMatchingBase = (clsName: string, allClassNames: string[]): boolean => {
+  const base = cleanClassBase(clsName);
+  return allClassNames.some(other => other !== clsName && cleanClassBase(other) === base);
+};
+
 interface ConflictReportProps {
   conflicts: TeacherConflict[];
   exemptions: ExemptionPair[];
@@ -119,7 +134,7 @@ export default function ConflictReport({
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-white rounded-2xl border border-slate-200/50 p-4 shadow-sm flex items-center gap-3.5 transition-all hover:shadow-md/5" id="stats-total-checked">
-          <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl shrink-0">
+          <div className="p-2.5 bg-teal-50 text-teal-600 rounded-xl shrink-0">
             <BookOpen className="w-5 h-5" />
           </div>
           <div>
@@ -129,7 +144,7 @@ export default function ConflictReport({
         </div>
 
         <div className="bg-white rounded-2xl border border-slate-200/50 p-4 shadow-sm flex items-center gap-3.5 transition-all hover:shadow-md/5" id="stats-teachers-found">
-          <div className="p-2.5 bg-teal-50 text-teal-600 rounded-xl shrink-0">
+          <div className="p-2.5 bg-emerald-50 text-emerald-600 rounded-xl shrink-0">
             <User className="w-5 h-5" />
           </div>
           <div>
@@ -139,7 +154,7 @@ export default function ConflictReport({
         </div>
 
         <div className="bg-white rounded-2xl border border-slate-200/50 p-4 shadow-sm flex items-center gap-3.5 transition-all hover:shadow-md/5" id="stats-exemptions">
-          <div className="p-2.5 bg-emerald-50 text-emerald-600 rounded-xl shrink-0">
+          <div className="p-2.5 bg-teal-50 text-teal-600 rounded-xl shrink-0">
             <Users className="w-5 h-5" />
           </div>
           <div>
@@ -218,7 +233,7 @@ export default function ConflictReport({
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 placeholder="Tìm theo Tên Giáo Viên, Lớp hoặc Tiết..."
-                className="w-full pl-9 pr-4 py-1.5 bg-white border border-slate-200/60 rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-400 transition-all text-slate-700"
+                className="w-full pl-9 pr-4 py-1.5 bg-white border border-slate-200/60 rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-teal-500/10 focus:border-teal-400 transition-all text-slate-700"
                 id="search-conflicts-input"
               />
             </div>
@@ -232,7 +247,7 @@ export default function ConflictReport({
               <select
                 value={dayFilter}
                 onChange={(e) => setDayFilter(e.target.value)}
-                className="px-3 py-1.5 bg-white border border-slate-200/60 rounded-lg text-xs text-slate-600 font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-400 cursor-pointer transition-all"
+                className="px-3 py-1.5 bg-white border border-slate-200/60 rounded-lg text-xs text-slate-600 font-bold focus:outline-none focus:ring-2 focus:ring-teal-500/10 focus:border-teal-400 cursor-pointer transition-all"
                 id="filter-day-select"
               >
                 <option value="all">Tất cả các ngày</option>
@@ -292,30 +307,44 @@ export default function ConflictReport({
                         {/* Các Lớp bị trùng */}
                         <td className="px-4 py-3">
                           <div className="flex flex-wrap items-center gap-1.5">
-                            {c.classes.map((className, idx) => (
-                              <span 
-                                key={idx} 
-                                className="px-2.5 py-1 bg-rose-50 text-rose-700 border border-rose-100 rounded-lg text-[11px] font-bold shadow-sm shadow-rose-600/5"
-                              >
-                                {formatClassName(className)}
-                              </span>
-                            ))}
+                            {c.classes.map((className, idx) => {
+                              const isSameBase = hasMatchingBase(className, c.classes);
+                              return (
+                                <span 
+                                  key={idx} 
+                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold shadow-sm transition-all border ${
+                                    isSameBase
+                                      ? 'bg-indigo-50 text-indigo-700 border-indigo-200 shadow-indigo-600/5 font-extrabold ring-1 ring-indigo-300/15'
+                                      : 'bg-rose-50 text-rose-700 border-rose-100 shadow-rose-600/5'
+                                  }`}
+                                >
+                                  {formatClassName(className)}
+                                </span>
+                              );
+                            })}
                           </div>
                         </td>
 
                         {/* Chi tiết các cặp trùng thực tế */}
                         <td className="px-4 py-3 font-semibold text-slate-500 text-xs">
                           <div className="flex flex-wrap items-center gap-1.5">
-                            {c.conflictPairs.map((pair, idx) => (
-                              <span 
-                                key={idx}
-                                className="inline-flex items-center gap-1.5 px-2 py-1 bg-slate-50 text-slate-600 rounded-lg border border-slate-200/50 font-bold text-[11px]"
-                              >
-                                {formatClassName(pair[0])}
-                                <ArrowRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                                {formatClassName(pair[1])}
-                              </span>
-                            ))}
+                            {c.conflictPairs.map((pair, idx) => {
+                              const isSameBase = cleanClassBase(pair[0]) === cleanClassBase(pair[1]);
+                              return (
+                                <span 
+                                  key={idx}
+                                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-bold text-[11px] border transition-all ${
+                                    isSameBase
+                                      ? 'bg-indigo-50/70 text-indigo-700 border-indigo-200 shadow-sm shadow-indigo-600/5 ring-1 ring-indigo-300/10'
+                                      : 'bg-slate-50 text-slate-600 border-slate-200/50'
+                                  }`}
+                                >
+                                  {formatClassName(pair[0])}
+                                  <ArrowRight className={`w-3.5 h-3.5 shrink-0 ${isSameBase ? 'text-indigo-400' : 'text-slate-400'}`} />
+                                  {formatClassName(pair[1])}
+                                </span>
+                              );
+                            })}
                           </div>
                         </td>
                       </tr>

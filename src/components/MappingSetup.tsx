@@ -119,7 +119,7 @@ export default function MappingSetup({
   return (
     <div id="mapping-setup-container" className="bg-white rounded-xl border border-slate-100 p-6 shadow-sm">
       <div className="flex items-center gap-2.5 mb-5 border-b border-slate-100 pb-4">
-        <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg">
+        <div className="p-2 bg-teal-50 text-teal-600 rounded-lg">
           <Settings2 className="w-5 h-5" />
         </div>
         <div>
@@ -185,7 +185,7 @@ export default function MappingSetup({
 
       {/* Grid mappings editor */}
       <h4 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-1.5">
-        <Table className="w-4 h-4 text-indigo-500" />
+        <Table className="w-4 h-4 text-teal-500" />
         Danh sách các cột trong file Excel của bạn:
       </h4>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
@@ -214,7 +214,7 @@ export default function MappingSetup({
               <select
                 value={mapping.role}
                 onChange={(e) => updateColumnRole(mapping.index, e.target.value as ColumnRole)}
-                className="w-full text-xs px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors cursor-pointer"
+                className="w-full text-xs px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-medium focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-colors cursor-pointer"
                 id={`mapping-select-${mapping.index}`}
               >
                 <option value="class">📚 Lớp học (Kiểm tra trùng)</option>
@@ -268,7 +268,7 @@ export default function MappingSetup({
           disabled={!isValid}
           className={`flex items-center gap-1.5 px-5 py-2.5 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
             isValid
-              ? 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm shadow-indigo-600/10'
+              ? 'bg-teal-600 hover:bg-teal-700 text-white shadow-sm shadow-teal-600/10'
               : 'bg-slate-100 text-slate-400 cursor-not-allowed'
           }`}
           id="proceed-to-check-btn"
