@@ -151,6 +151,11 @@ export function detectConflicts(
       }
     }
 
+    // Skip processing dividers, blank rows, or rows outside the school timetable block
+    if ((profile === 'THPT' || profile === 'TieuHoc') && day === 'Nghỉ/Trống') {
+      continue;
+    }
+
     let period = 'Chưa xác định';
     if (periodCol !== undefined) {
       const cellVal = row[periodCol.index];

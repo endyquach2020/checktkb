@@ -49,10 +49,33 @@ const cleanClassBase = (clsName: string): string => {
   return cleaned;
 };
 
-// Check if a class has a matching base name in a list of classes
-const hasMatchingBase = (clsName: string, allClassNames: string[]): boolean => {
-  const base = cleanClassBase(clsName);
-  return allClassNames.some(other => other !== clsName && cleanClassBase(other) === base);
+// Check if two classes are a valid partner pair (same base, or 10.1 & 10.2, 11.1 & 11.2, 12.1 & 12.2)
+const isWithinValidPair = (cls1: string, cls2: string): boolean => {
+  const c1 = cleanClassBase(cls1);
+  const c2 = cleanClassBase(cls2);
+  if (c1 === c2) return true;
+  if ((c1 === '10.1' && c2 === '10.2') || (c1 === '10.2' && c2 === '10.1')) return true;
+  if ((c1 === '11.1' && c2 === '11.2') || (c1 === '11.2' && c2 === '11.1')) return true;
+  if ((c1 === '12.1' && c2 === '12.2') || (c1 === '12.2' && c2 === '12.1')) return true;
+  return false;
+};
+
+// Determine class badge styling based on whether it conflicts with an unexpected class
+const getClassBadgeStyles = (clsName: string, allClassNames: string[]): string => {
+  const hasInvalidConflict = allClassNames.some(other => other !== clsName && !isWithinValidPair(clsName, other));
+  if (hasInvalidConflict) {
+    return 'bg-purple-100 text-purple-800 border-purple-300 shadow-purple-600/5 ring-1 ring-purple-300/10 font-black';
+  }
+  return 'bg-rose-50 text-rose-700 border-rose-100 shadow-rose-600/5';
+};
+
+// Determine conflict pair styling based on whether the specific pair is a valid partner pair
+const getPairBadgeStyles = (pair: [string, string]): string => {
+  const isPairValid = isWithinValidPair(pair[0], pair[1]);
+  if (!isPairValid) {
+    return 'bg-purple-50 text-purple-700 border-purple-200 shadow-sm shadow-purple-600/5 ring-1 ring-purple-300/10 font-bold';
+  }
+  return 'bg-rose-50/70 text-rose-700 border-rose-100 shadow-sm shadow-rose-600/5';
 };
 
 interface ConflictReportProps {
@@ -307,21 +330,14 @@ export default function ConflictReport({
                         {/* Các Lớp bị trùng */}
                         <td className="px-4 py-3">
                           <div className="flex flex-wrap items-center gap-1.5">
-                            {c.classes.map((className, idx) => {
-                              const isSameBase = hasMatchingBase(className, c.classes);
-                              return (
-                                <span 
-                                  key={idx} 
-                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold shadow-sm transition-all border ${
-                                    isSameBase
-                                      ? 'bg-indigo-50 text-indigo-700 border-indigo-200 shadow-indigo-600/5 font-extrabold ring-1 ring-indigo-300/15'
-                                      : 'bg-rose-50 text-rose-700 border-rose-100 shadow-rose-600/5'
-                                  }`}
-                                >
-                                  {formatClassName(className)}
-                                </span>
-                              );
-                            })}
+                            {c.classes.map((className, idx) => (
+                              <span 
+                                key={idx} 
+                                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold shadow-sm transition-all border ${getClassBadgeStyles(className, c.classes)}`}
+                              >
+                                {formatClassName(className)}
+                              </span>
+                            ))}
                           </div>
                         </td>
 
@@ -329,18 +345,14 @@ export default function ConflictReport({
                         <td className="px-4 py-3 font-semibold text-slate-500 text-xs">
                           <div className="flex flex-wrap items-center gap-1.5">
                             {c.conflictPairs.map((pair, idx) => {
-                              const isSameBase = cleanClassBase(pair[0]) === cleanClassBase(pair[1]);
+                              const isPairValid = isWithinValidPair(pair[0], pair[1]);
                               return (
                                 <span 
                                   key={idx}
-                                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-bold text-[11px] border transition-all ${
-                                    isSameBase
-                                      ? 'bg-indigo-50/70 text-indigo-700 border-indigo-200 shadow-sm shadow-indigo-600/5 ring-1 ring-indigo-300/10'
-                                      : 'bg-slate-50 text-slate-600 border-slate-200/50'
-                                  }`}
+                                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-bold text-[11px] border transition-all ${getPairBadgeStyles(pair)}`}
                                 >
                                   {formatClassName(pair[0])}
-                                  <ArrowRight className={`w-3.5 h-3.5 shrink-0 ${isSameBase ? 'text-indigo-400' : 'text-slate-400'}`} />
+                                  <ArrowRight className={`w-3.5 h-3.5 shrink-0 ${isPairValid ? 'text-rose-400' : 'text-purple-400'}`} />
                                   {formatClassName(pair[1])}
                                 </span>
                               );
