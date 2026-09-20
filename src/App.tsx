@@ -9,6 +9,7 @@ import {
 } from './types';
 import { 
   detectConflicts, 
+  detectSplitPeriods,
   generateSampleExcel, 
   extractTeacher, 
   normalizeTeacherName,
@@ -28,7 +29,8 @@ import {
   FileDown, 
   Check, 
   ArrowRight,
-  Sparkles
+  Sparkles,
+  Clock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -347,6 +349,7 @@ export default function App() {
     }
 
     const conflicts = detectConflicts(rowsToCheck, activeMappings, exemptions, extractionSettings, checkProfile);
+    const splitIssues = detectSplitPeriods(rowsToCheck, activeMappings, extractionSettings, checkProfile);
 
     // Calculate statistics
     let cellCheckCount = 0;
@@ -368,6 +371,7 @@ export default function App() {
 
     return {
       conflicts,
+      splitIssues,
       totalCellsChecked: cellCheckCount,
       totalTeachers: teacherSet.size
     };
@@ -632,12 +636,19 @@ export default function App() {
                 {conflictReportData.conflicts.length > 0 ? (
                   <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 text-rose-700 text-xs font-extrabold rounded-full border border-rose-150">
                     <span className="w-1.5 h-1.5 bg-rose-600 rounded-full animate-ping"></span>
-                    Phát hiện {conflictReportData.conflicts.length} lỗi trùng lịch
+                    {conflictReportData.conflicts.length} lỗi trùng lịch
                   </span>
                 ) : (
                   <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 text-xs font-extrabold rounded-full border border-emerald-150">
                     <Check className="w-3.5 h-3.5 text-emerald-600" />
-                    Thời khóa biểu hợp lệ
+                    Không trùng lịch
+                  </span>
+                )}
+
+                {conflictReportData.splitIssues.length > 0 && (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 text-amber-700 text-xs font-extrabold rounded-full border border-amber-200 shadow-sm">
+                    <Clock className="w-3.5 h-3.5 text-amber-600" />
+                    {conflictReportData.splitIssues.length} lớp bị chia tiết
                   </span>
                 )}
               </>
@@ -865,6 +876,7 @@ export default function App() {
                 <div className="w-full">
                   <ConflictReport
                     conflicts={conflictReportData.conflicts}
+                    splitIssues={conflictReportData.splitIssues}
                     exemptions={exemptions}
                     totalCellsChecked={conflictReportData.totalCellsChecked}
                     totalTeachersFound={conflictReportData.totalTeachers}

@@ -36,6 +36,30 @@ export interface TeacherConflict {
   conflictPairs: [string, string][]; // List of actual conflicting class pairs (excluding exempted ones)
 }
 
+export type DaySession = 'Sáng' | 'Chiều' | 'Khác';
+
+export interface SplitPeriodSlot {
+  period: string;
+  session: DaySession;
+  periodNum: number;
+  rowIndex: number;
+  originalValue: string;
+}
+
+export interface SplitPeriodIssue {
+  id: string;
+  day: string;
+  className: string;
+  teacher: string;
+  subject?: string;
+  splitType: 'morning_afternoon' | 'isolated_periods' | 'both';
+  morningPeriods: string[];
+  afternoonPeriods: string[];
+  totalPeriods: number;
+  description: string;
+  slots: SplitPeriodSlot[];
+}
+
 export interface TeacherInfo {
   originalValue: string;
   teacherName: string;

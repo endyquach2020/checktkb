@@ -5,7 +5,10 @@ import {
   TeacherConflict, 
   TeacherInfo, 
   ExtractionSettings,
-  CellRange
+  CellRange,
+  DaySession,
+  SplitPeriodSlot,
+  SplitPeriodIssue
 } from '../types';
 
 /**
@@ -252,20 +255,43 @@ export function generateSampleExcel(): void {
     for (let rowIdx = startRowIdx; rowIdx <= endRowIdx; rowIdx++) {
       const slotNum = rowIdx - startRowIdx + 1;
       
-      // Introduce dynamic teacher assignments with realistic conflicts to show system's accuracy
-      let cls10A1 = `Toán - Thầy Hải`;
-      let cls10A2 = slotNum === 1 ? `Văn - Thầy Hải` : `Văn - Cô Vy`; // Conflict on Monday/Tuesday etc. Tiết 1
-      
-      let cls11A1 = `Lý - Cô Hương`;
-      let cls11A2 = slotNum === 2 ? `Sử - Cô Hương` : `Hóa - Thầy Nam`; // Conflict on Tiết 2
-      
-      let cls1A = `Toán - Cô Vy`;
-      let cls2A = slotNum === 3 ? `Văn - Cô Vy` : `Anh - Cô Vy`; // Conflict on Tiết 3
+      // Realistic timetable slots:
+      // - 10A1: Toán Thầy Hải (tiết 1, 2) -> Consecutive morning (KHÔNG bị chia)
+      // - 10A2: Văn Cô Vy (tiết 1 sáng & tiết 6 chiều) -> Bị chia 2 buổi (Sáng & Chiều)
+      // - 11A1: Hóa Thầy Nam (tiết 1 & tiết 3 sáng) -> Loãng xương buổi sáng
+      // - 11A2: Tiết 2 trùng giáo viên (xung đột giờ)
+      let cls10A1 = 'Sinh hoạt';
+      if (slotNum === 1 || slotNum === 2) cls10A1 = 'Toán - Thầy Hải';
+      else if (slotNum === 3 || slotNum === 4) cls10A1 = 'Lý - Cô Hương';
+      else if (slotNum === 5) cls10A1 = 'Sinh - Thầy Bình';
+      else if (slotNum === 6 || slotNum === 7) cls10A1 = 'Anh - Cô Mai';
+
+      let cls10A2 = 'Tự chọn';
+      if (slotNum === 1) cls10A2 = 'Văn - Cô Vy'; // Sáng tiết 1
+      else if (slotNum === 2) cls10A2 = 'Sử - Cô Hương';
+      else if (slotNum === 3 || slotNum === 4) cls10A2 = 'Toán - Thầy Nam';
+      else if (slotNum === 6) cls10A2 = 'Văn - Cô Vy'; // Chiều tiết 6 -> Bị chia sáng & chiều!
+
+      let cls11A1 = 'Tin học';
+      if (slotNum === 1) cls11A1 = 'Hóa - Thầy Nam'; // Tiết 1
+      else if (slotNum === 2) cls11A1 = 'Toán - Thầy Hải'; // Tiết 2
+      else if (slotNum === 3) cls11A1 = 'Hóa - Thầy Nam'; // Tiết 3 -> Loãng xương sáng!
+      else if (slotNum === 4 || slotNum === 5) cls11A1 = 'Văn - Cô Vy';
+
+      let cls11A2 = 'GDCD';
+      if (slotNum === 1) cls11A2 = 'Địa - Cô Tâm';
+      else if (slotNum === 2) cls11A2 = 'Sử - Cô Hương'; // Xung đột với 10A2 nếu Cô Hương dạy cả hai
+      else if (slotNum === 6 || slotNum === 7) cls11A2 = 'GDCD - Thầy Bình';
+
+      let cls1A = slotNum <= 2 ? 'Toán - Cô Vy' : (slotNum <= 4 ? 'Tiếng Việt' : 'Mỹ thuật');
+      let cls2A = slotNum === 1 ? 'Toán - Cô Vy' : (slotNum <= 3 ? 'Anh văn' : 'Âm nhạc');
+
+      const periodLabel = slotNum <= 5 ? `Tiết ${slotNum} (Sáng)` : `Tiết ${slotNum} (Chiều)`;
 
       data[rowIdx] = [
         '', '', '', '',
-        `${dayName} - Tiết ${slotNum}`, cls1A, cls2A, 'Toán - Thầy Hải', 'Địa - Cô Tâm', 'Mỹ thuật', // E to J (Tiểu học)
-        `${dayName} - Tiết ${slotNum}`, cls10A1, cls10A2, cls11A1, cls11A2, 'Tin học - Cô Nhi', 'Sinh - Thầy Bình', 'GDCD', 'Địa', 'Sử', 'QPAN', 'Sinh hoạt' // K to V (THPT)
+        `${dayName} - ${periodLabel}`, cls1A, cls2A, 'Toán - Thầy Hải', 'Địa - Cô Tâm', 'Mỹ thuật', // E to J (Tiểu học)
+        `${dayName} - ${periodLabel}`, cls10A1, cls10A2, cls11A1, cls11A2, 'Tin học - Cô Nhi', 'Sinh - Thầy Bình', 'GDCD', 'Địa', 'Sử', 'QPAN', 'Sinh hoạt' // K to V (THPT)
       ];
     }
   };
@@ -381,4 +407,361 @@ export function parseExcelRange(rangeStr: string): CellRange | null {
     startCol: Math.min(startCol, endCol),
     endCol: Math.max(startCol, endCol)
   };
+}
+
+/**
+ * Parses the period text, dayRowIndex, or timetable row to determine:
+ * - periodNum: 1..5 for Morning ('Sáng'), 6..8+ for Afternoon ('Chiều')
+ * - session: 'Sáng' | 'Chiều'
+ * - displayName: standardized display label (e.g. "Tiết 1 (Sáng)", "Tiết 6 (Chiều)")
+ */
+export function parsePeriodInfo(
+  periodText: string,
+  dayRowIndex?: number,
+  rowIndex?: number,
+  profile?: 'THPT' | 'TieuHoc' | 'All'
+): { periodNum: number; session: DaySession; displayName: string } {
+  const p = (periodText || '').toLowerCase().trim();
+
+  // 1. Text mentioning relative afternoon period, e.g. "Tiết 1 chiều", "T1 chiều", "1 chiều"
+  const relChieuMatch = p.match(/(?:tiết|t)?\s*([1-5])\s*(?:chiều|chieu|pm)/i);
+  if (relChieuMatch) {
+    const relNum = parseInt(relChieuMatch[1], 10);
+    const periodNum = relNum + 5; // 1 chiều -> 6, 2 chiều -> 7, 3 chiều -> 8
+    return {
+      periodNum,
+      session: 'Chiều',
+      displayName: `Tiết ${periodNum} (Chiều)`
+    };
+  }
+
+  // 2. Explicit "Tiết X" or "TX" where X is a number
+  const tietMatch = p.match(/(?:tiết|t)\s*(\d+)/i);
+  if (tietMatch) {
+    const num = parseInt(tietMatch[1], 10);
+    if (num <= 5) {
+      return { periodNum: num, session: 'Sáng', displayName: `Tiết ${num} (Sáng)` };
+    } else {
+      return { periodNum: num, session: 'Chiều', displayName: `Tiết ${num} (Chiều)` };
+    }
+  }
+
+  // 3. Standalone digits (e.g. "1", "2", "3", "4", "5", "6", "7", "8")
+  const digitMatch = p.match(/^(\d+)$/);
+  if (digitMatch) {
+    const num = parseInt(digitMatch[1], 10);
+    if (num <= 5) {
+      return { periodNum: num, session: 'Sáng', displayName: `Tiết ${num} (Sáng)` };
+    } else {
+      return { periodNum: num, session: 'Chiều', displayName: `Tiết ${num} (Chiều)` };
+    }
+  }
+
+  // 4. Time matching:
+  // 7h.. -> Tiết 1; 8h.. -> Tiết 2; 9h.. -> Tiết 3; 10h.. -> Tiết 4; 11h.. -> Tiết 5
+  // 13h.. -> Tiết 6; 14h.. -> Tiết 7; 15h.. -> Tiết 8; 16h.. -> Tiết 9
+  const hourMatch = p.match(/(\d{1,2})[h:]/);
+  if (hourMatch) {
+    const hour = parseInt(hourMatch[1], 10);
+    if (hour >= 6 && hour < 12) {
+      let pNum = 1;
+      if (hour <= 7) pNum = 1;
+      else if (hour === 8) pNum = 2;
+      else if (hour === 9) pNum = 3;
+      else if (hour === 10) pNum = 4;
+      else pNum = 5;
+      return { periodNum: pNum, session: 'Sáng', displayName: `Tiết ${pNum} (Sáng)` };
+    } else if (hour >= 12 && hour <= 18) {
+      let pNum = 6;
+      if (hour <= 13) pNum = 6;
+      else if (hour === 14) pNum = 7;
+      else if (hour === 15) pNum = 8;
+      else pNum = 9;
+      return { periodNum: pNum, session: 'Chiều', displayName: `Tiết ${pNum} (Chiều)` };
+    }
+  }
+
+  // 5. If profile THPT or TieuHoc, use row offset relative to day block:
+  // In each day block (e.g. Thứ 2 rows 10-24):
+  // First 5 periods (offset 0..4) are Tiết 1..5 (Sáng)
+  // Next 3+ periods (offset 5..7) are Tiết 6..8 (Chiều)
+  if (rowIndex !== undefined && (profile === 'THPT' || profile === 'TieuHoc')) {
+    const rowNum = rowIndex + 6;
+    let dayBase = 0;
+    if (rowNum >= 10 && rowNum <= 24) dayBase = 10;
+    else if (rowNum >= 28 && rowNum <= 43) dayBase = 28;
+    else if (rowNum >= 47 && rowNum <= 62) dayBase = 47;
+    else if (rowNum >= 66 && rowNum <= 81) dayBase = 66;
+    else if (rowNum >= 85 && rowNum <= 100) dayBase = 85;
+
+    if (dayBase > 0) {
+      const offset = rowNum - dayBase;
+      const pNum = offset + 1;
+      if (pNum <= 5) {
+        return { periodNum: pNum, session: 'Sáng', displayName: `Tiết ${pNum} (Sáng)` };
+      } else {
+        return { periodNum: pNum, session: 'Chiều', displayName: `Tiết ${pNum} (Chiều)` };
+      }
+    }
+  }
+
+  // 6. DayRowIndex fallback
+  if (dayRowIndex !== undefined && dayRowIndex >= 0) {
+    const pNum = dayRowIndex + 1;
+    if (pNum <= 5) {
+      return { periodNum: pNum, session: 'Sáng', displayName: `Tiết ${pNum} (Sáng)` };
+    } else {
+      return { periodNum: pNum, session: 'Chiều', displayName: `Tiết ${pNum} (Chiều)` };
+    }
+  }
+
+  return { periodNum: 1, session: 'Sáng', displayName: periodText || 'Tiết 1' };
+}
+
+/**
+ * Backward compatibility helper for session determination
+ */
+export function determineSession(
+  period: string,
+  rowIndex: number,
+  profile?: 'THPT' | 'TieuHoc' | 'All'
+): DaySession {
+  return parsePeriodInfo(period, undefined, rowIndex, profile).session;
+}
+
+/**
+ * Checks for "Tiết bị chia / Loãng xương" in a single day for each class:
+ * - Morning: Periods 1, 2, 3, 4, 5. Consecutive teaching is NOT split.
+ * - Afternoon: Periods 6, 7, 8. Consecutive teaching is NOT split.
+ * - ONLY flagged as split / loãng xương if:
+ *   + A teacher teaches a period, then has NO period for that class, and then later teaches that class again!
+ *     (e.g., Morning period 1, then no period, then morning period 3 -> Loãng xương buổi sáng).
+ *     (e.g., Afternoon period 6, then no period, then afternoon period 8 -> Loãng xương buổi chiều).
+ *     (e.g., Morning period 1, then no periods, then afternoon period 6 -> Bị chia 2 buổi Sáng & Chiều).
+ */
+export function detectSplitPeriods(
+  rows: string[][],
+  mappings: ColumnMapping[],
+  extractionSettings: ExtractionSettings,
+  profile?: 'THPT' | 'TieuHoc' | 'All'
+): SplitPeriodIssue[] {
+  const dayCol = mappings.find(m => m.role === 'day');
+  const periodCol = mappings.find(m => m.role === 'period');
+  const classCols = mappings.filter(m => m.role === 'class');
+
+  if (classCols.length === 0) return [];
+
+  let lastSeenDay = 'Chưa xác định';
+  const dayRowCounters = new Map<string, number>();
+
+  // Map: Key (day__class__teacher[__subject]) -> { day, className, teacher, subject, slots }
+  const teacherClassDayMap = new Map<string, {
+    day: string;
+    className: string;
+    teacher: string;
+    subject?: string;
+    slots: SplitPeriodSlot[];
+  }>();
+
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+    const row = rows[rowIndex];
+    if (!row || row.length === 0) continue;
+
+    // Determine Day
+    let day = 'Chưa xác định';
+    if (dayCol !== undefined) {
+      const cellVal = row[dayCol.index];
+      if (cellVal && String(cellVal).trim()) {
+        day = String(cellVal).trim();
+        lastSeenDay = day;
+      } else {
+        day = lastSeenDay;
+      }
+    } else {
+      if (profile === 'THPT' || profile === 'TieuHoc') {
+        const rowNum = rowIndex + 6;
+        if (rowNum >= 10 && rowNum <= 24) {
+          day = 'Thứ 2';
+        } else if (rowNum >= 28 && rowNum <= 43) {
+          day = 'Thứ 3';
+        } else if (rowNum >= 47 && rowNum <= 62) {
+          day = 'Thứ 4';
+        } else if (rowNum >= 66 && rowNum <= 81) {
+          day = 'Thứ 5';
+        } else if (rowNum >= 85 && rowNum <= 100) {
+          day = 'Thứ 6';
+        } else {
+          day = 'Nghỉ/Trống';
+        }
+      } else {
+        day = lastSeenDay;
+      }
+    }
+
+    // Skip empty or rest rows
+    if ((profile === 'THPT' || profile === 'TieuHoc') && day === 'Nghỉ/Trống') {
+      continue;
+    }
+    if (day === 'Chưa xác định') continue;
+
+    const currentDayRow = dayRowCounters.get(day) || 0;
+    dayRowCounters.set(day, currentDayRow + 1);
+
+    // Determine Period text
+    let periodText = '';
+    if (periodCol !== undefined) {
+      const cellVal = row[periodCol.index];
+      if (cellVal && String(cellVal).trim()) {
+        periodText = String(cellVal).trim();
+      }
+    }
+
+    const { periodNum, session, displayName } = parsePeriodInfo(
+      periodText,
+      currentDayRow,
+      rowIndex,
+      profile
+    );
+
+    // Scan each class column
+    classCols.forEach(col => {
+      const cellValue = row[col.index];
+      const extracted = extractTeacher(cellValue, extractionSettings);
+      if (!extracted || !extracted.teacherName) return;
+
+      const normTeacher = normalizeTeacherName(extracted.teacherName);
+      const normClass = normalizeClassName(col.header);
+      const normSubject = extracted.subjectName ? normalizeTeacherName(extracted.subjectName) : '';
+
+      const key = `${day}__${normClass}__${normTeacher}${normSubject ? `__${normSubject}` : ''}`;
+
+      if (!teacherClassDayMap.has(key)) {
+        teacherClassDayMap.set(key, {
+          day,
+          className: col.header,
+          teacher: extracted.teacherName,
+          subject: extracted.subjectName,
+          slots: []
+        });
+      }
+
+      teacherClassDayMap.get(key)!.slots.push({
+        period: periodText || displayName,
+        session,
+        periodNum,
+        rowIndex,
+        originalValue: extracted.originalValue
+      });
+    });
+  }
+
+  const issues: SplitPeriodIssue[] = [];
+
+  teacherClassDayMap.forEach((entry) => {
+    const { day, className, teacher, subject, slots } = entry;
+    if (slots.length <= 1) return; // Single period taught, cannot be split
+
+    // Sort slots by periodNum ascending
+    slots.sort((a, b) => a.periodNum - b.periodNum);
+
+    // Deduplicate any slots having the exact same periodNum
+    const uniqueSlots: SplitPeriodSlot[] = [];
+    slots.forEach(slot => {
+      if (uniqueSlots.length === 0 || uniqueSlots[uniqueSlots.length - 1].periodNum !== slot.periodNum) {
+        uniqueSlots.push(slot);
+      }
+    });
+
+    if (uniqueSlots.length <= 1) return;
+
+    // Morning periods (1 to 5) and Afternoon periods (6 to 8+)
+    const morningSlots = uniqueSlots.filter(s => s.periodNum <= 5);
+    const afternoonSlots = uniqueSlots.filter(s => s.periodNum >= 6);
+
+    // 1. Check for gap in Morning: teaching a period, then no period, then teaching again
+    const morningGaps: string[] = [];
+    for (let i = 0; i < morningSlots.length - 1; i++) {
+      const current = morningSlots[i].periodNum;
+      const next = morningSlots[i + 1].periodNum;
+      if (next - current > 1) {
+        const missing: number[] = [];
+        for (let m = current + 1; m < next; m++) {
+          missing.push(m);
+        }
+        morningGaps.push(`Dạy Tiết ${current}, trống Tiết ${missing.join(', ')}, đến Tiết ${next} mới dạy`);
+      }
+    }
+    const hasMorningGap = morningGaps.length > 0;
+
+    // 2. Check for gap in Afternoon: teaching a period, then no period, then teaching again
+    const afternoonGaps: string[] = [];
+    for (let i = 0; i < afternoonSlots.length - 1; i++) {
+      const current = afternoonSlots[i].periodNum;
+      const next = afternoonSlots[i + 1].periodNum;
+      if (next - current > 1) {
+        const missing: number[] = [];
+        for (let m = current + 1; m < next; m++) {
+          missing.push(m);
+        }
+        afternoonGaps.push(`Dạy Tiết ${current}, trống Tiết ${missing.join(', ')}, đến Tiết ${next} mới dạy`);
+      }
+    }
+    const hasAfternoonGap = afternoonGaps.length > 0;
+
+    // 3. Check for morning & afternoon split
+    const isMorningAfternoonSplit = morningSlots.length > 0 && afternoonSlots.length > 0;
+
+    // STRICT USER RULE:
+    // "Nếu các tiết 1,2,3,4,5 là buổi sáng thì không xem là bị chia. Chiều là tiết 6,7,8 là buổi chiều và không xem là bị chia.
+    // trừ trường hợp dạy 1 tiết rồi k có tiết lớp đó sau đó lại có tiết lớp đó mới gọi bị chia hay loãng xương"
+    //
+    // => If all periods are in morning and consecutive without gaps: NOT split!
+    // => If all periods are in afternoon and consecutive without gaps: NOT split!
+    // => Only if there is a gap (morning gap, afternoon gap, or split between morning and afternoon): FLAGGED!
+    if (!isMorningAfternoonSplit && !hasMorningGap && !hasAfternoonGap) {
+      return;
+    }
+
+    let splitType: 'morning_afternoon' | 'isolated_periods' | 'both';
+    if (isMorningAfternoonSplit && (hasMorningGap || hasAfternoonGap)) {
+      splitType = 'both';
+    } else if (isMorningAfternoonSplit) {
+      splitType = 'morning_afternoon';
+    } else {
+      splitType = 'isolated_periods';
+    }
+
+    const morningPeriods = morningSlots.map(s => s.period);
+    const afternoonPeriods = afternoonSlots.map(s => s.period);
+
+    // Build clear descriptive explanation
+    const descParts: string[] = [];
+    if (isMorningAfternoonSplit) {
+      descParts.push(`Bị chia 2 buổi (Sáng ${morningSlots.length} tiết: ${morningPeriods.join(', ')} & Chiều ${afternoonSlots.length} tiết: ${afternoonPeriods.join(', ')})`);
+    }
+    if (hasMorningGap) {
+      descParts.push(`Loãng xương sáng (${morningGaps.join('; ')})`);
+    }
+    if (hasAfternoonGap) {
+      descParts.push(`Loãng xương chiều (${afternoonGaps.join('; ')})`);
+    }
+
+    const description = descParts.join(' • ');
+
+    issues.push({
+      id: `${day}-${className}-${teacher}-${splitType}`,
+      day,
+      className,
+      teacher,
+      subject,
+      splitType,
+      morningPeriods,
+      afternoonPeriods,
+      totalPeriods: uniqueSlots.length,
+      description,
+      slots: uniqueSlots
+    });
+  });
+
+  return issues;
 }
