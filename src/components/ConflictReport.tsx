@@ -1,5 +1,13 @@
-import { useState, useMemo } from 'react';
-import { TeacherConflict, ExemptionPair, SplitPeriodIssue } from '../types';
+import React, { useState, useMemo, useEffect, FormEvent } from 'react';
+import { 
+  TeacherConflict, 
+  ExemptionPair, 
+  SplitPeriodIssue, 
+  SimultaneousMatch, 
+  SimultaneousCheckConfig,
+  TimetableConstraint,
+  ConstraintCheckResult
+} from '../types';
 import { 
   CheckCircle2, 
   AlertTriangle, 
@@ -14,9 +22,14 @@ import {
   Sun,
   Moon,
   Layers,
-  Sparkles
+  Sparkles,
+  SlidersHorizontal,
+  Check,
+  RotateCcw,
+  ShieldCheck
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { ConstraintManager } from './ConstraintManager';
 
 // Helper to format days to match standard format (e.g., "Thứ Hai" -> "Thứ 2")
 const formatDay = (day: string): string => {
@@ -84,25 +97,61 @@ const getPairBadgeStyles = (pair: [string, string]): string => {
 interface ConflictReportProps {
   conflicts: TeacherConflict[];
   splitIssues?: SplitPeriodIssue[];
+  simultaneousMatches?: SimultaneousMatch[];
+  simultaneousConfig?: SimultaneousCheckConfig;
+  onUpdateSimultaneousConfig?: (config: SimultaneousCheckConfig) => void;
   exemptions: ExemptionPair[];
   totalCellsChecked: number;
   totalTeachersFound: number;
+  constraints?: TimetableConstraint[];
+  constraintResults?: ConstraintCheckResult[];
+  availableTeachers?: string[];
+  availableClasses?: string[];
+  onSaveConstraint?: (constraint: TimetableConstraint) => void;
+  onDeleteConstraint?: (id: string) => void;
+  onToggleConstraint?: (id: string, isActive: boolean) => void;
+  onResetConstraints?: () => void;
 }
 
 export default function ConflictReport({
   conflicts,
   splitIssues = [],
+  simultaneousMatches = [],
+  simultaneousConfig = {
+    classQuery1: '10.2',
+    classQuery2: '12.2',
+    teacherQuery1: 'Thầy Mịnh',
+    teacherQuery2: 'Thầy Đ. Minh'
+  },
+  onUpdateSimultaneousConfig,
   exemptions,
   totalCellsChecked,
-  totalTeachersFound
+  totalTeachersFound,
+  constraints = [],
+  constraintResults = [],
+  availableTeachers = [],
+  availableClasses = [],
+  onSaveConstraint,
+  onDeleteConstraint,
+  onToggleConstraint,
+  onResetConstraints
 }: ConflictReportProps) {
-  // Tab state: 'conflicts' or 'splitPeriods'
-  const [activeTab, setActiveTab] = useState<'conflicts' | 'splitPeriods'>(() => {
+  // Tab state: 'conflicts' | 'splitPeriods' | 'simultaneous' | 'constraints'
+  const [activeTab, setActiveTab] = useState<'conflicts' | 'splitPeriods' | 'simultaneous' | 'constraints'>(() => {
     if (conflicts.length === 0 && splitIssues.length > 0) {
       return 'splitPeriods';
     }
     return 'conflicts';
   });
+
+  // Constraint counts
+  const violatedConstraintsCount = useMemo(() => {
+    return constraintResults.filter(r => !r.satisfied).length;
+  }, [constraintResults]);
+
+  const satisfiedConstraintsCount = useMemo(() => {
+    return constraintResults.filter(r => r.satisfied).length;
+  }, [constraintResults]);
 
   // Conflicts filter state
   const [searchTerm, setSearchTerm] = useState('');
@@ -112,6 +161,53 @@ export default function ConflictReport({
   const [splitSearchTerm, setSplitSearchTerm] = useState('');
   const [splitDayFilter, setSplitDayFilter] = useState('all');
   const [splitTypeFilter, setSplitTypeFilter] = useState<'all' | 'morning_afternoon' | 'isolated_periods' | 'both'>('all');
+
+  // Simultaneous check filter & config state
+  const [simSearchTerm, setSimSearchTerm] = useState('');
+  const [simDayFilter, setSimDayFilter] = useState('all');
+  const [simTypeFilter, setSimTypeFilter] = useState<'all' | 'diff_teachers' | 'same_teacher'>('all');
+
+  // Local interactive configuration inputs
+  const [cfgClass1, setCfgClass1] = useState(simultaneousConfig.classQuery1);
+  const [cfgClass2, setCfgClass2] = useState(simultaneousConfig.classQuery2);
+  const [cfgTeacher1, setCfgTeacher1] = useState(simultaneousConfig.teacherQuery1);
+  const [cfgTeacher2, setCfgTeacher2] = useState(simultaneousConfig.teacherQuery2);
+  const [showConfigPanel, setShowConfigPanel] = useState(false);
+
+  // Synchronize local form inputs if external config changes
+  useEffect(() => {
+    setCfgClass1(simultaneousConfig.classQuery1);
+    setCfgClass2(simultaneousConfig.classQuery2);
+    setCfgTeacher1(simultaneousConfig.teacherQuery1);
+    setCfgTeacher2(simultaneousConfig.teacherQuery2);
+  }, [simultaneousConfig]);
+
+  const handleApplyConfig = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (onUpdateSimultaneousConfig) {
+      onUpdateSimultaneousConfig({
+        classQuery1: cfgClass1.trim() || '10.2',
+        classQuery2: cfgClass2.trim() || '12.2',
+        teacherQuery1: cfgTeacher1.trim() || 'Thầy Mịnh',
+        teacherQuery2: cfgTeacher2.trim() || 'Thầy Đ. Minh'
+      });
+    }
+  };
+
+  const handleResetConfig = () => {
+    setCfgClass1('10.2');
+    setCfgClass2('12.2');
+    setCfgTeacher1('Thầy Mịnh');
+    setCfgTeacher2('Thầy Đ. Minh');
+    if (onUpdateSimultaneousConfig) {
+      onUpdateSimultaneousConfig({
+        classQuery1: '10.2',
+        classQuery2: '12.2',
+        teacherQuery1: 'Thầy Mịnh',
+        teacherQuery2: 'Thầy Đ. Minh'
+      });
+    }
+  };
 
   // Extract unique days for the conflict filter dropdown
   const uniqueConflictDays = useMemo(() => {
@@ -130,6 +226,15 @@ export default function ConflictReport({
     });
     return Array.from(days);
   }, [splitIssues]);
+
+  // Extract unique days for simultaneous matches filter dropdown
+  const uniqueSimDays = useMemo(() => {
+    const days = new Set<string>();
+    simultaneousMatches.forEach(m => {
+      if (m.day) days.add(m.day);
+    });
+    return Array.from(days);
+  }, [simultaneousMatches]);
 
   // Filter conflicts
   const filteredConflicts = useMemo(() => {
@@ -167,6 +272,29 @@ export default function ConflictReport({
       return matchSearch && matchDay && matchType;
     });
   }, [splitIssues, splitSearchTerm, splitDayFilter, splitTypeFilter]);
+
+  // Filter simultaneous matches
+  const filteredSimultaneousMatches = useMemo(() => {
+    return simultaneousMatches.filter(item => {
+      const term = simSearchTerm.toLowerCase();
+      const matchSearch =
+        !term ||
+        item.day.toLowerCase().includes(term) ||
+        item.period.toLowerCase().includes(term) ||
+        item.class1.className.toLowerCase().includes(term) ||
+        item.class1.teacher.toLowerCase().includes(term) ||
+        (item.class1.subject && item.class1.subject.toLowerCase().includes(term)) ||
+        item.class2.className.toLowerCase().includes(term) ||
+        item.class2.teacher.toLowerCase().includes(term) ||
+        (item.class2.subject && item.class2.subject.toLowerCase().includes(term)) ||
+        item.description.toLowerCase().includes(term);
+
+      const matchDay = simDayFilter === 'all' || item.day === simDayFilter;
+      const matchType = simTypeFilter === 'all' || item.type === simTypeFilter;
+
+      return matchSearch && matchDay && matchType;
+    });
+  }, [simultaneousMatches, simSearchTerm, simDayFilter, simTypeFilter]);
 
   // Export conflict report to Excel
   const handleExportConflicts = () => {
@@ -242,6 +370,48 @@ export default function ConflictReport({
     XLSX.writeFile(wb, 'bao_cao_tiet_day_bi_chia.xlsx');
   };
 
+  // Export simultaneous teaching matches to Excel
+  const handleExportSimultaneous = () => {
+    if (simultaneousMatches.length === 0) return;
+
+    const wb = XLSX.utils.book_new();
+
+    const exportData = filteredSimultaneousMatches.map((item, index) => {
+      const typeText = item.type === 'same_teacher'
+        ? `Cả 2 lớp cùng học 1 thầy (${item.class1.teacher})`
+        : `Học 2 thầy cùng lúc (${item.class1.teacher} & ${item.class2.teacher})`;
+
+      return {
+        'STT': index + 1,
+        'Thứ': formatDay(item.day),
+        'Tiết / Khung giờ': item.period,
+        'Buổi': item.session,
+        [`Lớp ${simultaneousConfig.classQuery1}`]: `${item.class1.subject ? item.class1.subject + ' - ' : ''}${item.class1.teacher}`,
+        [`Lớp ${simultaneousConfig.classQuery2}`]: `${item.class2.subject ? item.class2.subject + ' - ' : ''}${item.class2.teacher}`,
+        'Phân loại trùng': typeText,
+        'Mô tả diễn giải': item.description,
+        'Dòng Excel tương ứng': `Dòng ${item.rowIndex + 6}`
+      };
+    });
+
+    const ws = XLSX.utils.json_to_sheet(exportData);
+
+    ws['!cols'] = [
+      { wch: 6 },  // STT
+      { wch: 15 }, // Thứ
+      { wch: 20 }, // Tiết
+      { wch: 10 }, // Buổi
+      { wch: 30 }, // Lớp 1
+      { wch: 30 }, // Lớp 2
+      { wch: 32 }, // Phân loại
+      { wch: 60 }, // Mô tả
+      { wch: 22 }, // Dòng
+    ];
+
+    XLSX.utils.book_append_sheet(wb, ws, `Kiem_Tra_${simultaneousConfig.classQuery1}_${simultaneousConfig.classQuery2}`);
+    XLSX.writeFile(wb, `kiem_tra_trung_gio_${simultaneousConfig.classQuery1}_${simultaneousConfig.classQuery2}.xlsx`);
+  };
+
   const activeExemptionsCount = exemptions.filter(e => e.isActive).length;
 
   return (
@@ -249,28 +419,6 @@ export default function ConflictReport({
       
       {/* Summary Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Total Cells */}
-        <div className="bg-white rounded-2xl border border-slate-200/60 p-4 shadow-sm flex items-center gap-3.5 transition-all hover:shadow-md/5" id="stats-total-checked">
-          <div className="p-2.5 bg-teal-50 text-teal-600 rounded-xl shrink-0">
-            <BookOpen className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="text-xl font-extrabold text-slate-800 font-mono leading-none font-display">{totalCellsChecked}</div>
-            <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-1.5">Ô đã rà soát</div>
-          </div>
-        </div>
-
-        {/* Teachers */}
-        <div className="bg-white rounded-2xl border border-slate-200/60 p-4 shadow-sm flex items-center gap-3.5 transition-all hover:shadow-md/5" id="stats-teachers-found">
-          <div className="p-2.5 bg-emerald-50 text-emerald-600 rounded-xl shrink-0">
-            <User className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="text-xl font-extrabold text-slate-800 font-mono leading-none font-display">{totalTeachersFound}</div>
-            <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-1.5">Số Giáo viên</div>
-          </div>
-        </div>
-
         {/* Conflict Count (Clickable to switch tab) */}
         <div 
           onClick={() => setActiveTab('conflicts')}
@@ -334,10 +482,76 @@ export default function ConflictReport({
             <div className="text-[10px] opacity-75 font-bold uppercase tracking-wider mt-1.5">Tiết bị chia (Sáng/Chiều)</div>
           </div>
         </div>
+
+        {/* Simultaneous 10.2 & 12.2 Count (Clickable to switch tab) */}
+        <div 
+          onClick={() => setActiveTab('simultaneous')}
+          role="button"
+          tabIndex={0}
+          className={`rounded-2xl border p-4 shadow-sm flex items-center gap-3.5 transition-all cursor-pointer hover:shadow-md/10 ${
+            activeTab === 'simultaneous' ? 'ring-2 ring-indigo-400/40' : ''
+          } ${
+            simultaneousMatches.length > 0 
+              ? 'bg-indigo-50/70 border-indigo-200/80 text-indigo-900' 
+              : 'bg-emerald-50/60 border-emerald-200/80 text-emerald-800'
+          }`} 
+          id="stats-simultaneous-count"
+        >
+          <div className={`p-2.5 rounded-xl shrink-0 ${
+            simultaneousMatches.length > 0 ? 'bg-indigo-100 text-indigo-700' : 'bg-emerald-100 text-emerald-600'
+          }`}>
+            {simultaneousMatches.length > 0 ? <Users className="w-5 h-5" /> : <CheckCircle2 className="w-5 h-5" />}
+          </div>
+          <div className="flex-1">
+            <div className="flex items-center justify-between">
+              <div className="text-xl font-extrabold font-mono leading-none font-display">
+                {simultaneousMatches.length}
+              </div>
+              {activeTab === 'simultaneous' && (
+                <span className="text-[9px] px-1.5 py-0.5 bg-indigo-200 text-indigo-800 rounded font-bold uppercase">Đang xem</span>
+              )}
+            </div>
+            <div className="text-[10px] opacity-75 font-bold uppercase tracking-wider mt-1.5">Trùng {simultaneousConfig.classQuery1} & {simultaneousConfig.classQuery2}</div>
+          </div>
+        </div>
+
+        {/* Constraint System Count (Clickable to switch tab) */}
+        <div 
+          onClick={() => setActiveTab('constraints')}
+          role="button"
+          tabIndex={0}
+          className={`rounded-2xl border p-4 shadow-sm flex items-center gap-3.5 transition-all cursor-pointer hover:shadow-md/10 ${
+            activeTab === 'constraints' ? 'ring-2 ring-teal-500/40' : ''
+          } ${
+            violatedConstraintsCount > 0 
+              ? 'bg-rose-50/70 border-rose-200/80 text-rose-900' 
+              : 'bg-teal-50/60 border-teal-200/80 text-teal-900'
+          }`} 
+          id="stats-constraints-count"
+        >
+          <div className={`p-2.5 rounded-xl shrink-0 ${
+            violatedConstraintsCount > 0 ? 'bg-rose-100 text-rose-700' : 'bg-teal-100 text-teal-700'
+          }`}>
+            <ShieldCheck className="w-5 h-5" />
+          </div>
+          <div className="flex-1">
+            <div className="flex items-center justify-between">
+              <div className="text-xl font-extrabold font-mono leading-none font-display">
+                {violatedConstraintsCount > 0 ? `${violatedConstraintsCount} vi phạm` : `${satisfiedConstraintsCount} đạt`}
+              </div>
+              {activeTab === 'constraints' && (
+                <span className="text-[9px] px-1.5 py-0.5 bg-teal-200 text-teal-800 rounded font-bold uppercase">Đang xem</span>
+              )}
+            </div>
+            <div className="text-[10px] opacity-75 font-bold uppercase tracking-wider mt-1.5">
+              Ràng buộc tùy chọn ({constraints.length})
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Mode Switcher Tabs */}
-      <div className="flex items-center gap-2 p-1.5 bg-slate-200/60 rounded-2xl w-fit" id="report-view-tabs">
+      <div className="flex flex-wrap items-center gap-2 p-1.5 bg-slate-200/60 rounded-2xl w-fit" id="report-view-tabs">
         <button
           onClick={() => setActiveTab('conflicts')}
           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
@@ -348,7 +562,7 @@ export default function ConflictReport({
           id="tab-btn-conflicts"
         >
           <AlertTriangle className={`w-4 h-4 ${conflicts.length > 0 ? 'text-rose-500' : 'text-slate-400'}`} />
-          <span>Trùng lịch dạy cùng giờ</span>
+          <span>Trùng lịch dạy cùng giờ (GV)</span>
           <span className={`px-2 py-0.5 rounded-full text-[11px] font-extrabold ${
             conflicts.length > 0 ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-500'
           }`}>
@@ -372,6 +586,46 @@ export default function ConflictReport({
           }`}>
             {splitIssues.length}
           </span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('simultaneous')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+            activeTab === 'simultaneous'
+              ? 'bg-white text-slate-900 shadow-sm shadow-slate-200'
+              : 'text-slate-600 hover:text-slate-900'
+          }`}
+          id="tab-btn-simultaneous"
+        >
+          <Users className={`w-4 h-4 ${simultaneousMatches.length > 0 ? 'text-indigo-600' : 'text-slate-400'}`} />
+          <span>Kiểm tra {simultaneousConfig.classQuery1} & {simultaneousConfig.classQuery2} ({simultaneousConfig.teacherQuery1} & {simultaneousConfig.teacherQuery2})</span>
+          <span className={`px-2 py-0.5 rounded-full text-[11px] font-extrabold ${
+            simultaneousMatches.length > 0 ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-500'
+          }`}>
+            {simultaneousMatches.length}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('constraints')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+            activeTab === 'constraints'
+              ? 'bg-white text-slate-900 shadow-sm shadow-slate-200'
+              : 'text-slate-600 hover:text-slate-900'
+          }`}
+          id="tab-btn-constraints"
+        >
+          <ShieldCheck className={`w-4 h-4 ${violatedConstraintsCount > 0 ? 'text-rose-600' : 'text-teal-600'}`} />
+          <span>Kiểm tra Ràng buộc (Tự động)</span>
+          {violatedConstraintsCount > 0 ? (
+            <span className="px-2 py-0.5 rounded-full text-[11px] font-extrabold bg-rose-100 text-rose-700 animate-pulse">
+              {violatedConstraintsCount} vi phạm
+            </span>
+          ) : (
+            <span className="px-2 py-0.5 rounded-full text-[11px] font-extrabold bg-emerald-100 text-emerald-700">
+              {satisfiedConstraintsCount} đạt
+            </span>
+          )}
         </button>
       </div>
 
@@ -793,6 +1047,332 @@ export default function ConflictReport({
             </div>
           </div>
         </div>
+      )}
+
+      {/* TAB 3: SIMULTANEOUS TEACHING CHECK (11.2 & 12.2 with Thầy Mịnh & Thầy Đ. Minh) */}
+      {activeTab === 'simultaneous' && (
+        <div className="bg-white rounded-2xl border border-slate-200/60 p-6 shadow-sm space-y-6" id="simultaneous-report-section">
+          
+          {/* Header & Quick Explanation */}
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-100 pb-5">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+                  <Users className="w-5 h-5" />
+                </span>
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900 font-display">
+                    Kiểm tra trùng giờ dạy: Lớp {simultaneousConfig.classQuery1} & Lớp {simultaneousConfig.classQuery2}
+                  </h3>
+                  <p className="text-xs text-slate-500 font-medium mt-0.5">
+                    Rà soát xem cùng 1 thời điểm (Thứ & Tiết), 2 lớp này có đang học cùng lúc với <strong>{simultaneousConfig.teacherQuery1}</strong> và <strong>{simultaneousConfig.teacherQuery2}</strong> không.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowConfigPanel(prev => !prev)}
+                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                  showConfigPanel
+                    ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                    : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+                }`}
+                id="toggle-sim-config-btn"
+              >
+                <SlidersHorizontal className="w-3.5 h-3.5 text-indigo-600" />
+                <span>{showConfigPanel ? 'Đóng cấu hình tìm kiếm' : 'Tùy chỉnh Lớp / Giáo viên'}</span>
+              </button>
+
+              <button
+                onClick={handleExportSimultaneous}
+                disabled={simultaneousMatches.length === 0}
+                className="inline-flex items-center gap-2 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl transition-all shadow-sm cursor-pointer"
+                id="export-simultaneous-excel-btn"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Xuất Excel ({simultaneousMatches.length})</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Interactive Configuration Box (Collapsible) */}
+          {showConfigPanel && (
+            <form onSubmit={handleApplyConfig} className="p-4 bg-indigo-50/40 border border-indigo-100 rounded-xl space-y-3" id="sim-config-panel">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-indigo-950 uppercase tracking-wider flex items-center gap-1.5">
+                  <SlidersHorizontal className="w-3.5 h-3.5 text-indigo-600" />
+                  Cấu hình đối tượng kiểm tra trùng giờ
+                </span>
+                <button
+                  type="button"
+                  onClick={handleResetConfig}
+                  className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 cursor-pointer"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  Khôi phục mặc định (10.2 & 12.2)
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                <div>
+                  <label className="block text-[10px] font-extrabold uppercase text-slate-500 mb-1">Lớp thứ nhất:</label>
+                  <input
+                    type="text"
+                    value={cfgClass1}
+                    onChange={(e) => setCfgClass1(e.target.value)}
+                    placeholder="VD: 10.2"
+                    className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-extrabold uppercase text-slate-500 mb-1">Lớp thứ hai:</label>
+                  <input
+                    type="text"
+                    value={cfgClass2}
+                    onChange={(e) => setCfgClass2(e.target.value)}
+                    placeholder="VD: 12.2"
+                    className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-extrabold uppercase text-slate-500 mb-1">Giáo viên 1:</label>
+                  <input
+                    type="text"
+                    value={cfgTeacher1}
+                    onChange={(e) => setCfgTeacher1(e.target.value)}
+                    placeholder="VD: Thầy Mịnh"
+                    className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-extrabold uppercase text-slate-500 mb-1">Giáo viên 2:</label>
+                  <input
+                    type="text"
+                    value={cfgTeacher2}
+                    onChange={(e) => setCfgTeacher2(e.target.value)}
+                    placeholder="VD: Thầy Đ. Minh"
+                    className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-1">
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-all shadow-sm cursor-pointer flex items-center gap-1.5"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  Áp dụng kiểm tra ngay
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* Quick Filter Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50/70 p-3 rounded-xl border border-slate-200/50">
+            {/* Search Input */}
+            <div className="relative flex-1 min-w-[220px]">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={simSearchTerm}
+                onChange={(e) => setSimSearchTerm(e.target.value)}
+                placeholder={`Tìm kiếm thứ, tiết, môn, ${simultaneousConfig.teacherQuery1}, ${simultaneousConfig.teacherQuery2}...`}
+                className="w-full pl-9 pr-3 py-1.5 bg-white border border-slate-200/60 rounded-lg text-xs placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-400 transition-all font-medium"
+                id="sim-search-input"
+              />
+            </div>
+
+            {/* Day Filter */}
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                <Filter className="w-3.5 h-3.5" />
+                Thứ:
+              </span>
+              <select
+                value={simDayFilter}
+                onChange={(e) => setSimDayFilter(e.target.value)}
+                className="px-3 py-1.5 bg-white border border-slate-200/60 rounded-lg text-xs text-slate-600 font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-400 cursor-pointer transition-all"
+                id="sim-filter-day-select"
+              >
+                <option value="all">Tất cả các ngày</option>
+                {uniqueSimDays.map(day => (
+                  <option key={day} value={day}>{formatDay(day)}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Type Filter */}
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                Phân loại:
+              </span>
+              <select
+                value={simTypeFilter}
+                onChange={(e) => setSimTypeFilter(e.target.value as 'all' | 'diff_teachers' | 'same_teacher')}
+                className="px-3 py-1.5 bg-white border border-slate-200/60 rounded-lg text-xs text-slate-600 font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-400 cursor-pointer transition-all"
+                id="sim-filter-type-select"
+              >
+                <option value="all">Tất cả trường hợp</option>
+                <option value="diff_teachers">Học 2 thầy cùng lúc</option>
+                <option value="same_teacher">Cả 2 lớp cùng học 1 thầy</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Simultaneous Teaching Matches Table */}
+          <div className="overflow-hidden border border-slate-200/50 rounded-xl shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm" id="simultaneous-table">
+                <thead className="bg-slate-50/50 border-b border-slate-200/50 text-slate-400 font-extrabold uppercase text-[10px] tracking-wider">
+                  <tr>
+                    <th className="px-4 py-3 w-14 text-center">STT</th>
+                    <th className="px-4 py-3 w-28">Thứ</th>
+                    <th className="px-4 py-3 w-36">Tiết & Buổi</th>
+                    <th className="px-4 py-3 w-56">Lớp {simultaneousConfig.classQuery1}</th>
+                    <th className="px-4 py-3 w-56">Lớp {simultaneousConfig.classQuery2}</th>
+                    <th className="px-4 py-3 w-48">Phân loại</th>
+                    <th className="px-4 py-3">Mô tả chi tiết & Vị trí Excel</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {filteredSimultaneousMatches.length === 0 ? (
+                    <tr id="simultaneous-empty-row">
+                      <td colSpan={7} className="px-5 py-10 text-center text-slate-400 italic bg-slate-50/20 font-medium">
+                        {simultaneousMatches.length === 0 ? (
+                          <div className="flex flex-col items-center justify-center gap-2 py-4">
+                            <CheckCircle2 className="w-8 h-8 text-emerald-500" />
+                            <span className="text-slate-700 font-bold text-sm not-italic">
+                              Không có thời điểm nào 2 lớp {simultaneousConfig.classQuery1} và {simultaneousConfig.classQuery2} học cùng lúc với {simultaneousConfig.teacherQuery1} và {simultaneousConfig.teacherQuery2}!
+                            </span>
+                            <span className="text-xs text-slate-400 max-w-lg not-italic font-normal">
+                              Lịch dạy của {simultaneousConfig.teacherQuery1} và {simultaneousConfig.teacherQuery2} ở 2 lớp này được sắp xếp hoàn toàn lệch giờ nhau, không xảy ra trùng tiết đồng thời.
+                            </span>
+                          </div>
+                        ) : (
+                          'Không tìm thấy trường hợp trùng giờ nào khớp với bộ lọc hiện tại.'
+                        )}
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredSimultaneousMatches.map((match, index) => {
+                      const isSameTeacher = match.type === 'same_teacher';
+
+                      return (
+                        <tr key={match.id} className="hover:bg-indigo-50/20 transition-colors">
+                          {/* STT */}
+                          <td className="px-4 py-3 text-center text-xs font-mono text-slate-400 font-medium">
+                            {index + 1}
+                          </td>
+
+                          {/* Thứ */}
+                          <td className="px-4 py-3">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-extrabold bg-slate-100 text-slate-700 border border-slate-200">
+                              {formatDay(match.day)}
+                            </span>
+                          </td>
+
+                          {/* Tiết & Buổi */}
+                          <td className="px-4 py-3">
+                            <div className="flex flex-col gap-1">
+                              <span className="font-extrabold text-xs text-slate-800">
+                                {match.period}
+                              </span>
+                              <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold w-fit ${
+                                match.session === 'Sáng'
+                                  ? 'bg-amber-100/70 text-amber-800'
+                                  : 'bg-indigo-100/70 text-indigo-800'
+                              }`}>
+                                {match.session === 'Sáng' ? <Sun className="w-2.5 h-2.5" /> : <Moon className="w-2.5 h-2.5" />}
+                                {match.session}
+                              </span>
+                            </div>
+                          </td>
+
+                          {/* Lớp 1 (11.2) */}
+                          <td className="px-4 py-3">
+                            <div className="flex flex-col gap-1">
+                              <span className="text-xs font-extrabold text-slate-800">
+                                {formatClassName(match.class1.className)}
+                              </span>
+                              <div className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-indigo-50 border border-indigo-100 rounded-md text-xs font-bold text-indigo-900 w-fit">
+                                <User className="w-3 h-3 text-indigo-600" />
+                                <span>{match.class1.teacher}</span>
+                                {match.class1.subject && (
+                                  <span className="text-[10px] font-normal text-indigo-700">({match.class1.subject})</span>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Lớp 2 (12.2) */}
+                          <td className="px-4 py-3">
+                            <div className="flex flex-col gap-1">
+                              <span className="text-xs font-extrabold text-slate-800">
+                                {formatClassName(match.class2.className)}
+                              </span>
+                              <div className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-violet-50 border border-violet-100 rounded-md text-xs font-bold text-violet-900 w-fit">
+                                <User className="w-3 h-3 text-violet-600" />
+                                <span>{match.class2.teacher}</span>
+                                {match.class2.subject && (
+                                  <span className="text-[10px] font-normal text-violet-700">({match.class2.subject})</span>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Phân loại */}
+                          <td className="px-4 py-3">
+                            {isSameTeacher ? (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-extrabold bg-rose-50 text-rose-700 border border-rose-200">
+                                <AlertTriangle className="w-3 h-3 text-rose-600" />
+                                Cùng 1 thầy dạy 2 lớp
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-extrabold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                <Users className="w-3 h-3 text-indigo-600" />
+                                Học 2 thầy cùng lúc
+                              </span>
+                            )}
+                          </td>
+
+                          {/* Mô tả chi tiết & Vị trí Excel */}
+                          <td className="px-4 py-3">
+                            <div className="space-y-1">
+                              <div className="text-xs font-bold text-slate-800">
+                                {match.description}
+                              </div>
+                              <div className="text-[11px] font-medium text-slate-400">
+                                Dòng Excel tương ứng: <span className="font-mono font-bold text-slate-600">Dòng {match.rowIndex + 6}</span>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 4: CONSTRAINT SYSTEM (Quản lý & Rà soát Ràng buộc Tự động) */}
+      {activeTab === 'constraints' && (
+        <ConstraintManager
+          constraints={constraints}
+          checkResults={constraintResults}
+          availableTeachers={availableTeachers}
+          availableClasses={availableClasses}
+          onSaveConstraint={onSaveConstraint || (() => {})}
+          onDeleteConstraint={onDeleteConstraint || (() => {})}
+          onToggleConstraint={onToggleConstraint || (() => {})}
+          onResetDefaults={onResetConstraints || (() => {})}
+        />
       )}
 
     </div>

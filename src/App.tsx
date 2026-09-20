@@ -1,15 +1,18 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { 
   ExemptionPair, 
   ColumnMapping, 
   ExtractionSettings, 
   ParseResult,
-  CellRange
+  CellRange,
+  SimultaneousMatch,
+  SimultaneousCheckConfig
 } from './types';
 import { 
   detectConflicts, 
   detectSplitPeriods,
+  detectSimultaneousTeaching,
   generateSampleExcel, 
   extractTeacher, 
   normalizeTeacherName,
@@ -19,6 +22,17 @@ import {
 import ExemptionSettingsComponent from './components/ExemptionSettings';
 import MappingSetup from './components/MappingSetup';
 import ConflictReport from './components/ConflictReport';
+import { ConstraintManager } from './components/ConstraintManager';
+import { 
+  TimetableConstraint, 
+  ConstraintCheckResult 
+} from './types';
+import { 
+  getStoredConstraints, 
+  saveStoredConstraints, 
+  DEFAULT_CONSTRAINTS, 
+  evaluateConstraints 
+} from './utils/constraintEngine';
 import { 
   Upload, 
   FileSpreadsheet, 
@@ -30,7 +44,9 @@ import {
   Check, 
   ArrowRight,
   Sparkles,
-  Clock
+  Clock,
+  Users,
+  ShieldCheck
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -113,6 +129,80 @@ export default function App() {
     }
     return null;
   }, [checkProfile]);
+
+  // Configuration for checking simultaneous class & teacher schedule (Default: 10.2 & 12.2 with Thầy Mịnh & Thầy Đ. Minh)
+  const [simultaneousConfig, setSimultaneousConfig] = useState<SimultaneousCheckConfig>({
+    classQuery1: '10.2',
+    classQuery2: '12.2',
+    teacherQuery1: 'Thầy Mịnh',
+    teacherQuery2: 'Thầy Đ. Minh'
+  });
+
+  // User-defined constraints for automated timetable verification (persisted in localStorage)
+  const [constraints, setConstraints] = useState<TimetableConstraint[]>(() => {
+    return getStoredConstraints();
+  });
+
+  // Persist constraints to localStorage whenever changed
+  useEffect(() => {
+    saveStoredConstraints(constraints);
+  }, [constraints]);
+
+  const handleSaveConstraint = (item: TimetableConstraint) => {
+    setConstraints(prev => {
+      const idx = prev.findIndex(c => c.id === item.id);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = item;
+        return next;
+      }
+      return [item, ...prev];
+    });
+
+    if (item.type === 'simultaneous_classes_teachers' && item.params.class1 && item.params.class2) {
+      setSimultaneousConfig({
+        classQuery1: item.params.class1,
+        classQuery2: item.params.class2,
+        teacherQuery1: item.params.teacher1 || '',
+        teacherQuery2: item.params.teacher2 || ''
+      });
+    }
+  };
+
+  const handleUpdateSimultaneousConfig = (newConfig: SimultaneousCheckConfig) => {
+    setSimultaneousConfig(newConfig);
+    setConstraints(prev => prev.map(c => {
+      if (c.type === 'simultaneous_classes_teachers' && c.id === 'c-simul-10-12') {
+        return {
+          ...c,
+          name: `Kiểm tra trùng giờ Lớp ${newConfig.classQuery1} & ${newConfig.classQuery2} (${newConfig.teacherQuery1} & ${newConfig.teacherQuery2})`,
+          params: {
+            ...c.params,
+            class1: newConfig.classQuery1,
+            class2: newConfig.classQuery2,
+            teacher1: newConfig.teacherQuery1,
+            teacher2: newConfig.teacherQuery2
+          }
+        };
+      }
+      return c;
+    }));
+  };
+
+  const handleDeleteConstraint = (id: string) => {
+    setConstraints(prev => prev.filter(c => c.id !== id));
+  };
+
+  const handleToggleConstraint = (id: string, isActive: boolean) => {
+    setConstraints(prev => prev.map(c => c.id === id ? { ...c, isActive } : c));
+  };
+
+  const handleResetConstraints = () => {
+    setConstraints(DEFAULT_CONSTRAINTS);
+  };
+
+  // Initial workflow tab: allow entering all requirements/constraints first, then uploading timetable
+  const [uploadTab, setUploadTab] = useState<'setup_constraints' | 'upload_file'>('setup_constraints');
 
   // Handle excel parsing
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -350,6 +440,22 @@ export default function App() {
 
     const conflicts = detectConflicts(rowsToCheck, activeMappings, exemptions, extractionSettings, checkProfile);
     const splitIssues = detectSplitPeriods(rowsToCheck, activeMappings, extractionSettings, checkProfile);
+    const simultaneousMatches = detectSimultaneousTeaching(
+      rowsToCheck,
+      activeMappings,
+      extractionSettings,
+      simultaneousConfig,
+      checkProfile
+    );
+
+    // Evaluate user-defined constraints
+    const constraintResults = evaluateConstraints(
+      rowsToCheck,
+      activeMappings,
+      extractionSettings,
+      constraints,
+      checkProfile
+    );
 
     // Calculate statistics
     let cellCheckCount = 0;
@@ -369,13 +475,20 @@ export default function App() {
       });
     });
 
+    const availableTeachers = Array.from(teacherSet).sort((a, b) => a.localeCompare(b, 'vi'));
+    const availableClasses = classCols.map(c => c.header).filter(Boolean);
+
     return {
       conflicts,
       splitIssues,
+      simultaneousMatches,
+      constraintResults,
+      availableTeachers,
+      availableClasses,
       totalCellsChecked: cellCheckCount,
       totalTeachers: teacherSet.size
     };
-  }, [parseResult, mappings, exemptions, extractionSettings, checkProfile]);
+  }, [parseResult, mappings, exemptions, extractionSettings, checkProfile, simultaneousConfig, constraints]);
 
   // Restart / Reset
   const handleReset = () => {
@@ -651,6 +764,29 @@ export default function App() {
                     {conflictReportData.splitIssues.length} lớp bị chia tiết
                   </span>
                 )}
+
+                {conflictReportData.simultaneousMatches.length > 0 ? (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 text-indigo-700 text-xs font-extrabold rounded-full border border-indigo-200 shadow-sm">
+                    <Users className="w-3.5 h-3.5 text-indigo-600" />
+                    {conflictReportData.simultaneousMatches.length} ca trùng {simultaneousConfig.classQuery1} & {simultaneousConfig.classQuery2}
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50/70 text-indigo-700 text-xs font-extrabold rounded-full border border-indigo-200/60 shadow-sm hidden sm:inline-flex">
+                    {simultaneousConfig.classQuery1} & {simultaneousConfig.classQuery2} không trùng
+                  </span>
+                )}
+
+                {conflictReportData.constraintResults?.some(r => !r.satisfied) ? (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 text-rose-700 text-xs font-extrabold rounded-full border border-rose-200 shadow-sm">
+                    <ShieldCheck className="w-3.5 h-3.5 text-rose-600" />
+                    {conflictReportData.constraintResults.filter(r => !r.satisfied).length} vi phạm ràng buộc
+                  </span>
+                ) : constraints.length > 0 ? (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-teal-50 text-teal-700 text-xs font-extrabold rounded-full border border-teal-200 shadow-sm hidden md:inline-flex">
+                    <ShieldCheck className="w-3.5 h-3.5 text-teal-600" />
+                    {constraints.length} ràng buộc đạt
+                  </span>
+                ) : null}
               </>
             )}
 
@@ -667,7 +803,7 @@ export default function App() {
           
           <AnimatePresence mode="wait">
             
-            {/* STEP 1: UPLOAD SCREEN */}
+            {/* STEP 1: PRE-UPLOAD CONSTRAINTS & UPLOAD SCREEN */}
             {step === 'upload' && (
               <motion.div
                 key="viewport-upload"
@@ -675,170 +811,252 @@ export default function App() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -15 }}
                 transition={{ duration: 0.2 }}
-                className="max-w-2xl mx-auto space-y-6"
+                className={uploadTab === 'setup_constraints' ? 'max-w-6xl mx-auto space-y-6' : 'max-w-3xl mx-auto space-y-6'}
               >
-                {/* Cấu hình cấp học rà soát */}
-                <div className="bg-white rounded-2xl border border-slate-200/50 p-5 shadow-sm space-y-4">
-                  <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
-                    <div className="p-1.5 bg-teal-50 text-teal-600 rounded-lg">
-                      <Settings2 className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Cấu hình cấp học & Phạm vi rà soát</h3>
-                      <p className="text-[11px] text-slate-400 font-medium">Hệ thống sẽ giới hạn vùng quét trong tệp Excel theo đúng lựa chọn này</p>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    {/* THPT Card */}
+                {/* Stepper Navigation: Bước 1: Nhập yêu cầu & ràng buộc -> Bước 2: Tải file TKB lên */}
+                <div className="bg-white/90 backdrop-blur-md rounded-2xl border border-slate-200/80 p-2 shadow-sm flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2" id="workflow-stepper-bar">
+                  <div className="flex items-center gap-2 p-1 bg-slate-100 rounded-xl flex-1">
                     <button
                       type="button"
-                      onClick={() => setCheckProfile('THPT')}
-                      className={`p-4 rounded-xl text-left border transition-all cursor-pointer relative flex flex-col justify-between ${
-                        checkProfile === 'THPT'
-                          ? 'border-teal-500 bg-teal-50/10 ring-2 ring-teal-500/5'
-                          : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50/40'
+                      id="tab-setup-constraints"
+                      onClick={() => setUploadTab('setup_constraints')}
+                      className={`flex-1 px-4 py-3 rounded-xl font-bold text-xs sm:text-sm transition-all flex items-center justify-center gap-2.5 cursor-pointer ${
+                        uploadTab === 'setup_constraints'
+                          ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
                       }`}
                     >
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-xs font-bold text-slate-800">Check THPT</span>
-                        <span className={`w-4 h-4 rounded-full border flex items-center justify-center text-[10px] ${
-                          checkProfile === 'THPT' ? 'border-teal-500 bg-teal-500 text-white' : 'border-slate-300'
-                        }`}>
-                          {checkProfile === 'THPT' && '✓'}
-                        </span>
-                      </div>
-                      <span className="text-[14px] font-extrabold text-teal-700 font-display">Ô K5 : V100</span>
-                      <span className="text-[10px] text-slate-500 font-medium mt-1 leading-normal">Dòng 5 là tên lớp. Cột K là thời gian. Kiểm tra trùng các cột lớp L đến V (dòng 10 - 100).</span>
-                    </button>
- 
-                    {/* Tiểu học Card */}
-                    <button
-                      type="button"
-                      onClick={() => setCheckProfile('TieuHoc')}
-                      className={`p-4 rounded-xl text-left border transition-all cursor-pointer relative flex flex-col justify-between ${
-                        checkProfile === 'TieuHoc'
-                          ? 'border-teal-500 bg-teal-50/10 ring-2 ring-teal-500/5'
-                          : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50/40'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-xs font-bold text-slate-800">Check Tiểu Học</span>
-                        <span className={`w-4 h-4 rounded-full border flex items-center justify-center text-[10px] ${
-                          checkProfile === 'TieuHoc' ? 'border-teal-500 bg-teal-500 text-white' : 'border-slate-300'
-                        }`}>
-                          {checkProfile === 'TieuHoc' && '✓'}
-                        </span>
-                      </div>
-                      <span className="text-[14px] font-extrabold text-teal-700 font-display">Ô E5 : J100</span>
-                      <span className="text-[10px] text-slate-500 font-medium mt-1 leading-normal">Dòng 5 là tên lớp. Cột E là thời gian. Kiểm tra trùng các cột lớp F đến J (dòng 10 - 100).</span>
+                      <ShieldCheck className="w-4 h-4 shrink-0" />
+                      <span>Bước 1: Nhập Yêu Cầu Ràng Buộc</span>
+                      <span className={`px-2 py-0.5 rounded-full text-[11px] font-mono font-black ${
+                        uploadTab === 'setup_constraints' ? 'bg-indigo-500 text-white' : 'bg-slate-200 text-slate-700'
+                      }`}>
+                        {constraints.filter(c => c.isActive).length}
+                      </span>
                     </button>
 
-                    {/* Toàn bộ bảng Card */}
                     <button
                       type="button"
-                      onClick={() => setCheckProfile('All')}
-                      className={`p-4 rounded-xl text-left border transition-all cursor-pointer relative flex flex-col justify-between ${
-                        checkProfile === 'All'
-                          ? 'border-teal-500 bg-teal-50/10 ring-2 ring-teal-500/5'
-                          : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50/40'
+                      id="tab-upload-file"
+                      onClick={() => setUploadTab('upload_file')}
+                      className={`flex-1 px-4 py-3 rounded-xl font-bold text-xs sm:text-sm transition-all flex items-center justify-center gap-2.5 cursor-pointer ${
+                        uploadTab === 'upload_file'
+                          ? 'bg-teal-600 text-white shadow-md shadow-teal-600/20'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
                       }`}
                     >
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-xs font-bold text-slate-800">Check Toàn Bộ</span>
-                        <span className={`w-4 h-4 rounded-full border flex items-center justify-center text-[10px] ${
-                          checkProfile === 'All' ? 'border-teal-500 bg-teal-500 text-white' : 'border-slate-300'
-                        }`}>
-                          {checkProfile === 'All' && '✓'}
-                        </span>
-                      </div>
-                      <span className="text-[14px] font-extrabold text-teal-700 font-display">Tự động</span>
-                      <span className="text-[10px] text-slate-500 font-medium mt-1 leading-normal">Quét tất cả các cột chứa thông tin lớp học</span>
+                      <Upload className="w-4 h-4 shrink-0" />
+                      <span>Bước 2: Tải File TKB & Kiểm Tra</span>
                     </button>
                   </div>
                 </div>
 
-                {/* Drag and Drop area */}
-                <div 
-                  onDragOver={handleDragOver}
-                  onDragLeave={handleDragLeave}
-                  onDrop={handleDrop}
-                  className={`bg-white border-2 border-dashed rounded-2xl p-10 text-center transition-all flex flex-col items-center justify-center min-h-[340px] cursor-pointer group shadow-sm ${
-                    isDragging 
-                      ? 'border-teal-500 bg-teal-50/20 ring-4 ring-teal-500/5 shadow-teal-100' 
-                      : 'border-slate-200 hover:border-teal-400 hover:bg-slate-50/30'
-                  }`}
-                  onClick={() => fileInputRef.current?.click()}
-                  id="drag-drop-zone"
-                >
-                  <input
-                    type="file"
-                    ref={fileInputRef}
-                    onChange={handleFileChange}
-                    accept=".xlsx, .xls"
-                    className="hidden"
-                  />
-                  <div className={`p-4 bg-slate-50 text-slate-400 rounded-xl mb-4 transition-all duration-300 ${
-                    isDragging ? 'bg-teal-100 text-teal-600 scale-105 shadow-sm' : 'group-hover:bg-teal-50 group-hover:text-teal-600 group-hover:scale-105'
-                  }`}>
-                    <Upload className="w-8 h-8" />
+                {/* BƯỚC 1: NHẬP VÀ LƯU RÀNG BUỘC TRƯỚC */}
+                {uploadTab === 'setup_constraints' && (
+                  <div className="space-y-6">
+                    <ConstraintManager
+                      constraints={constraints}
+                      onSaveConstraint={handleSaveConstraint}
+                      onDeleteConstraint={handleDeleteConstraint}
+                      onToggleConstraint={handleToggleConstraint}
+                      onResetDefaults={handleResetConstraints}
+                      isPreUpload={true}
+                      onProceedToUpload={() => setUploadTab('upload_file')}
+                    />
                   </div>
-                  <h3 className="text-base font-bold text-slate-800 font-display">Tải lên tệp Excel thời khóa biểu</h3>
-                  <p className="text-xs text-slate-500 mt-1 max-w-sm leading-relaxed">
-                    Kéo thả tệp tin <strong className="text-slate-700">.xlsx</strong> hoặc <strong className="text-slate-700">.xls</strong> vào đây, hoặc click để chọn từ thiết bị của bạn.
-                  </p>
+                )}
 
-                  <div className="flex flex-wrap items-center justify-center gap-4 mt-6 text-[11px] text-slate-400 font-bold uppercase tracking-wider">
-                    <span className="flex items-center gap-1 text-slate-500">
-                      <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span> Nhận diện tự động
-                    </span>
-                    <span className="flex items-center gap-1 text-slate-500">
-                      <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span> Cấu hình lớp ghép
-                    </span>
-                    <span className="flex items-center gap-1 text-slate-500">
-                      <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span> Lọc theo Thứ
-                    </span>
-                  </div>
-                </div>
+                {/* BƯỚC 2: TẢI FILE EXCEL LÊN ĐỂ KIỂM TRA */}
+                {uploadTab === 'upload_file' && (
+                  <div className="space-y-6">
+                    {/* Banner hiển thị số ràng buộc đã nạp */}
+                    <div className="bg-indigo-50/90 border border-indigo-200/80 rounded-2xl p-4.5 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs shadow-xs">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2.5 bg-indigo-600 text-white rounded-xl shadow-xs shrink-0">
+                          <ShieldCheck className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <div className="font-extrabold text-indigo-950 text-sm">
+                            Đang áp dụng {constraints.filter(c => c.isActive).length} yêu cầu ràng buộc đã lưu
+                          </div>
+                          <div className="text-indigo-700 text-xs mt-0.5">
+                            Hệ thống sẽ đối soát thời khóa biểu với toàn bộ các quy tắc này ngay khi bạn nạp file.
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setUploadTab('setup_constraints')}
+                        className="px-3.5 py-2 bg-white text-indigo-700 hover:bg-indigo-50 border border-indigo-200 rounded-xl font-bold transition-all text-xs cursor-pointer shadow-xs shrink-0 flex items-center gap-1.5"
+                      >
+                        <Settings2 className="w-3.5 h-3.5" />
+                        Xem / Thêm yêu cầu khác
+                      </button>
+                    </div>
 
-                {/* Instructions card */}
-                <div className="bg-white rounded-2xl border border-slate-200/50 p-6 shadow-sm space-y-4">
-                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <HelpCircle className="w-4 h-4 text-teal-500 shrink-0" />
-                    Hướng dẫn chuẩn bị bảng biểu Excel:
-                  </h4>
-                  <div className="space-y-3.5">
-                    <div className="flex items-start gap-3">
-                      <div className="w-5 h-5 bg-teal-50 text-teal-600 rounded-md flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">1</div>
-                      <p className="text-xs text-slate-600 leading-relaxed font-medium">
-                        <strong className="text-slate-900">Dòng 1 (Tiêu đề)</strong>: Chứa thông tin <span className="font-semibold text-slate-700">Tên lớp</span> (ví dụ: <code className="px-1.5 py-0.5 bg-slate-100 text-slate-700 font-mono rounded">10.1 TN</code>, <code className="px-1.5 py-0.5 bg-slate-100 text-slate-700 font-mono rounded">11.2 XH</code>...) xếp ngang từ cột F trở đi.
-                      </p>
-                    </div>
-                    <div className="flex items-start gap-3">
-                      <div className="w-5 h-5 bg-teal-50 text-teal-600 rounded-md flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">2</div>
-                      <p className="text-xs text-slate-600 leading-relaxed font-medium">
-                        <strong className="text-slate-900">Các cột đầu</strong>: Nên bao gồm thông tin <span className="font-semibold text-slate-700">Thứ (Thứ Hai, Thứ Ba...)</span> và <span className="font-semibold text-slate-700">Tiết học (Tiết 1, Tiết 2...)</span>.
-                      </p>
-                    </div>
-                    <div className="flex items-start gap-3">
-                      <div className="w-5 h-5 bg-teal-50 text-teal-600 rounded-md flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">3</div>
-                      <p className="text-xs text-slate-600 leading-relaxed font-medium">
-                        <strong className="text-slate-900">Dòng 5 trở xuống</strong>: Là dữ liệu thời khóa biểu thực tế. Mỗi ô điền dạng <code className="text-teal-600 font-bold">Môn học - Giáo viên</code> hoặc chỉ <code className="text-teal-600 font-bold">Tên giáo viên</code>.
-                      </p>
-                    </div>
-                  </div>
+                    {/* Cấu hình cấp học rà soát */}
+                    <div className="bg-white rounded-2xl border border-slate-200/50 p-5 shadow-sm space-y-4">
+                      <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
+                        <div className="p-1.5 bg-teal-50 text-teal-600 rounded-lg">
+                          <Settings2 className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Cấu hình cấp học & Phạm vi rà soát</h3>
+                          <p className="text-[11px] text-slate-400 font-medium">Hệ thống sẽ giới hạn vùng quét trong tệp Excel theo đúng lựa chọn này</p>
+                        </div>
+                      </div>
 
-                  <div className="mt-2 pt-4 border-t border-slate-100 flex justify-center">
-                    <button
-                      onClick={generateSampleExcel}
-                      className="inline-flex items-center gap-1.5 text-xs font-bold text-teal-700 hover:text-teal-850 bg-teal-50 hover:bg-teal-100/80 px-4 py-2.5 rounded-xl transition-all border border-teal-100/50 cursor-pointer shadow-sm shadow-teal-100/20"
-                      id="guide-download-sample-btn"
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        {/* THPT Card */}
+                        <button
+                          type="button"
+                          onClick={() => setCheckProfile('THPT')}
+                          className={`p-4 rounded-xl text-left border transition-all cursor-pointer relative flex flex-col justify-between ${
+                            checkProfile === 'THPT'
+                              ? 'border-teal-500 bg-teal-50/10 ring-2 ring-teal-500/5'
+                              : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50/40'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="text-xs font-bold text-slate-800">Check THPT</span>
+                            <span className={`w-4 h-4 rounded-full border flex items-center justify-center text-[10px] ${
+                              checkProfile === 'THPT' ? 'border-teal-500 bg-teal-500 text-white' : 'border-slate-300'
+                            }`}>
+                              {checkProfile === 'THPT' && '✓'}
+                            </span>
+                          </div>
+                          <span className="text-[14px] font-extrabold text-teal-700 font-display">Ô K5 : V100</span>
+                          <span className="text-[10px] text-slate-500 font-medium mt-1 leading-normal">Dòng 5 là tên lớp. Cột K là thời gian. Kiểm tra trùng các cột lớp L đến V (dòng 10 - 100).</span>
+                        </button>
+     
+                        {/* Tiểu học Card */}
+                        <button
+                          type="button"
+                          onClick={() => setCheckProfile('TieuHoc')}
+                          className={`p-4 rounded-xl text-left border transition-all cursor-pointer relative flex flex-col justify-between ${
+                            checkProfile === 'TieuHoc'
+                              ? 'border-teal-500 bg-teal-50/10 ring-2 ring-teal-500/5'
+                              : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50/40'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="text-xs font-bold text-slate-800">Check Tiểu Học</span>
+                            <span className={`w-4 h-4 rounded-full border flex items-center justify-center text-[10px] ${
+                              checkProfile === 'TieuHoc' ? 'border-teal-500 bg-teal-500 text-white' : 'border-slate-300'
+                            }`}>
+                              {checkProfile === 'TieuHoc' && '✓'}
+                            </span>
+                          </div>
+                          <span className="text-[14px] font-extrabold text-teal-700 font-display">Ô E5 : J100</span>
+                          <span className="text-[10px] text-slate-500 font-medium mt-1 leading-normal">Dòng 5 là tên lớp. Cột E là thời gian. Kiểm tra trùng các cột lớp F đến J (dòng 10 - 100).</span>
+                        </button>
+
+                        {/* Toàn bộ bảng Card */}
+                        <button
+                          type="button"
+                          onClick={() => setCheckProfile('All')}
+                          className={`p-4 rounded-xl text-left border transition-all cursor-pointer relative flex flex-col justify-between ${
+                            checkProfile === 'All'
+                              ? 'border-teal-500 bg-teal-50/10 ring-2 ring-teal-500/5'
+                              : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50/40'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="text-xs font-bold text-slate-800">Check Toàn Bộ</span>
+                            <span className={`w-4 h-4 rounded-full border flex items-center justify-center text-[10px] ${
+                              checkProfile === 'All' ? 'border-teal-500 bg-teal-500 text-white' : 'border-slate-300'
+                            }`}>
+                              {checkProfile === 'All' && '✓'}
+                            </span>
+                          </div>
+                          <span className="text-[14px] font-extrabold text-teal-700 font-display">Tự động</span>
+                          <span className="text-[10px] text-slate-500 font-medium mt-1 leading-normal">Quét tất cả các cột chứa thông tin lớp học</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Drag and Drop area */}
+                    <div 
+                      onDragOver={handleDragOver}
+                      onDragLeave={handleDragLeave}
+                      onDrop={handleDrop}
+                      className={`bg-white border-2 border-dashed rounded-2xl p-10 text-center transition-all flex flex-col items-center justify-center min-h-[340px] cursor-pointer group shadow-sm ${
+                        isDragging 
+                          ? 'border-teal-500 bg-teal-50/20 ring-4 ring-teal-500/5 shadow-teal-100' 
+                          : 'border-slate-200 hover:border-teal-400 hover:bg-slate-50/30'
+                      }`}
+                      onClick={() => fileInputRef.current?.click()}
+                      id="drag-drop-zone"
                     >
-                      <FileDown className="w-4 h-4" />
-                      Tải mẫu Excel chuẩn từ Dòng 5
-                    </button>
+                      <input
+                        type="file"
+                        ref={fileInputRef}
+                        onChange={handleFileChange}
+                        accept=".xlsx, .xls"
+                        className="hidden"
+                      />
+                      <div className={`p-4 bg-slate-50 text-slate-400 rounded-xl mb-4 transition-all duration-300 ${
+                        isDragging ? 'bg-teal-100 text-teal-600 scale-105 shadow-sm' : 'group-hover:bg-teal-50 group-hover:text-teal-600 group-hover:scale-105'
+                      }`}>
+                        <Upload className="w-8 h-8" />
+                      </div>
+                      <h3 className="text-base font-bold text-slate-800 font-display">Tải lên tệp Excel thời khóa biểu</h3>
+                      <p className="text-xs text-slate-500 mt-1 max-w-sm leading-relaxed">
+                        Kéo thả tệp tin <strong className="text-slate-700">.xlsx</strong> hoặc <strong className="text-slate-700">.xls</strong> vào đây, hoặc click để chọn từ thiết bị của bạn.
+                      </p>
+
+                      <div className="flex flex-wrap items-center justify-center gap-4 mt-6 text-[11px] text-slate-400 font-bold uppercase tracking-wider">
+                        <span className="flex items-center gap-1 text-slate-500">
+                          <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span> Đối chiếu {constraints.filter(c => c.isActive).length} yêu cầu
+                        </span>
+                        <span className="flex items-center gap-1 text-slate-500">
+                          <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span> Nhận diện tự động
+                        </span>
+                        <span className="flex items-center gap-1 text-slate-500">
+                          <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span> Cấu hình lớp ghép
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Instructions card */}
+                    <div className="bg-white rounded-2xl border border-slate-200/50 p-6 shadow-sm space-y-4">
+                      <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                        <HelpCircle className="w-4 h-4 text-teal-500 shrink-0" />
+                        Hướng dẫn chuẩn bị bảng biểu Excel:
+                      </h4>
+                      <div className="space-y-3.5">
+                        <div className="flex items-start gap-3">
+                          <div className="w-5 h-5 bg-teal-50 text-teal-600 rounded-md flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">1</div>
+                          <p className="text-xs text-slate-600 leading-relaxed font-medium">
+                            <strong className="text-slate-900">Dòng 1 (Tiêu đề)</strong>: Chứa thông tin <span className="font-semibold text-slate-700">Tên lớp</span> (ví dụ: <code className="px-1.5 py-0.5 bg-slate-100 text-slate-700 font-mono rounded">10.1 TN</code>, <code className="px-1.5 py-0.5 bg-slate-100 text-slate-700 font-mono rounded">11.2 XH</code>...) xếp ngang từ cột F trở đi.
+                          </p>
+                        </div>
+                        <div className="flex items-start gap-3">
+                          <div className="w-5 h-5 bg-teal-50 text-teal-600 rounded-md flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">2</div>
+                          <p className="text-xs text-slate-600 leading-relaxed font-medium">
+                            <strong className="text-slate-900">Các cột đầu</strong>: Nên bao gồm thông tin <span className="font-semibold text-slate-700">Thứ (Thứ Hai, Thứ Ba...)</span> và <span className="font-semibold text-slate-700">Tiết học (Tiết 1, Tiết 2...)</span>.
+                          </p>
+                        </div>
+                        <div className="flex items-start gap-3">
+                          <div className="w-5 h-5 bg-teal-50 text-teal-600 rounded-md flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">3</div>
+                          <p className="text-xs text-slate-600 leading-relaxed font-medium">
+                            <strong className="text-slate-900">Dòng 5 trở xuống</strong>: Là dữ liệu thời khóa biểu thực tế. Mỗi ô điền dạng <code className="text-teal-600 font-bold">Môn học - Giáo viên</code> hoặc chỉ <code className="text-teal-600 font-bold">Tên giáo viên</code>.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="mt-2 pt-4 border-t border-slate-100 flex justify-center">
+                        <button
+                          onClick={generateSampleExcel}
+                          className="inline-flex items-center gap-1.5 text-xs font-bold text-teal-700 hover:text-teal-850 bg-teal-50 hover:bg-teal-100/80 px-4 py-2.5 rounded-xl transition-all border border-teal-100/50 cursor-pointer shadow-sm shadow-teal-100/20"
+                          id="guide-download-sample-btn"
+                        >
+                          <FileDown className="w-4 h-4" />
+                          Tải mẫu Excel chuẩn từ Dòng 5
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                </div>
+                )}
               </motion.div>
             )}
 
@@ -877,9 +1095,20 @@ export default function App() {
                   <ConflictReport
                     conflicts={conflictReportData.conflicts}
                     splitIssues={conflictReportData.splitIssues}
+                    simultaneousMatches={conflictReportData.simultaneousMatches}
+                    simultaneousConfig={simultaneousConfig}
+                    onUpdateSimultaneousConfig={handleUpdateSimultaneousConfig}
                     exemptions={exemptions}
                     totalCellsChecked={conflictReportData.totalCellsChecked}
                     totalTeachersFound={conflictReportData.totalTeachers}
+                    constraints={constraints}
+                    constraintResults={conflictReportData.constraintResults}
+                    availableTeachers={conflictReportData.availableTeachers}
+                    availableClasses={conflictReportData.availableClasses}
+                    onSaveConstraint={handleSaveConstraint}
+                    onDeleteConstraint={handleDeleteConstraint}
+                    onToggleConstraint={handleToggleConstraint}
+                    onResetConstraints={handleResetConstraints}
                   />
                 </div>
               </motion.div>

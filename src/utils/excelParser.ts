@@ -8,7 +8,9 @@ import {
   CellRange,
   DaySession,
   SplitPeriodSlot,
-  SplitPeriodIssue
+  SplitPeriodIssue,
+  SimultaneousMatch,
+  SimultaneousCheckConfig
 } from '../types';
 
 /**
@@ -238,11 +240,11 @@ export function generateSampleExcel(): void {
     data.push(Array(23).fill(''));
   }
 
-  // Row index 4 corresponds to Row 5 in Excel (1-indexed), which is the HEADER row containing class names
+    // Row index 4 corresponds to Row 5 in Excel (1-indexed), which is the HEADER row containing class names
   data[4] = [
     '', '', '', '', // A, B, C, D empty
     'Thời gian Tiểu học', 'Lớp 1A', 'Lớp 2A', 'Lớp 3A', 'Lớp 4A', 'Lớp 5A', // E (4) to J (9) - Tiểu học
-    'Thời gian THPT', 'Lớp 10A1', 'Lớp 10A2', 'Lớp 11A1', 'Lớp 11A2', 'Lớp 12A1', 'Lớp 12A2', 'Lớp 10B1', 'Lớp 10B2', 'Lớp 11B1', 'Lớp 11B2', 'Lớp 12B1' // K (10) to V (21) - THPT
+    'Thời gian THPT', 'Lớp 10A1', 'Lớp 10.2', 'Lớp 11.1', 'Lớp 11.2', 'Lớp 12.1', 'Lớp 12.2', 'Lớp 10B1', 'Lớp 10B2', 'Lớp 11B1', 'Lớp 11B2', 'Lớp 12B1' // K (10) to V (21) - THPT
   ];
 
   // Helper to populate day blocks matching the exact rows:
@@ -257,31 +259,57 @@ export function generateSampleExcel(): void {
       
       // Realistic timetable slots:
       // - 10A1: Toán Thầy Hải (tiết 1, 2) -> Consecutive morning (KHÔNG bị chia)
-      // - 10A2: Văn Cô Vy (tiết 1 sáng & tiết 6 chiều) -> Bị chia 2 buổi (Sáng & Chiều)
-      // - 11A1: Hóa Thầy Nam (tiết 1 & tiết 3 sáng) -> Loãng xương buổi sáng
-      // - 11A2: Tiết 2 trùng giáo viên (xung đột giờ)
+      // - 10.2: Thầy Mịnh & Thầy Đ. Minh trùng giờ với Lớp 12.2, kèm Văn Cô Vy (tiết 1 sáng & tiết 6 chiều)
+      // - 11.1: Hóa Thầy Nam (tiết 1 & tiết 3 sáng) -> Loãng xương buổi sáng
+      // - 10.2 & 12.2: Kiểm tra trùng giờ Thầy Mịnh & Thầy Đ. Minh
       let cls10A1 = 'Sinh hoạt';
       if (slotNum === 1 || slotNum === 2) cls10A1 = 'Toán - Thầy Hải';
       else if (slotNum === 3 || slotNum === 4) cls10A1 = 'Lý - Cô Hương';
       else if (slotNum === 5) cls10A1 = 'Sinh - Thầy Bình';
       else if (slotNum === 6 || slotNum === 7) cls10A1 = 'Anh - Cô Mai';
 
-      let cls10A2 = 'Tự chọn';
-      if (slotNum === 1) cls10A2 = 'Văn - Cô Vy'; // Sáng tiết 1
-      else if (slotNum === 2) cls10A2 = 'Sử - Cô Hương';
-      else if (slotNum === 3 || slotNum === 4) cls10A2 = 'Toán - Thầy Nam';
-      else if (slotNum === 6) cls10A2 = 'Văn - Cô Vy'; // Chiều tiết 6 -> Bị chia sáng & chiều!
+      let cls10_2 = 'Tự chọn';
+      if (slotNum === 1) cls10_2 = 'Văn - Cô Vy'; // Sáng tiết 1
+      else if (slotNum === 2) cls10_2 = 'Sử - Cô Hương';
+      else if (slotNum === 3) cls10_2 = 'Toán - Thầy Nam';
+      else if (slotNum === 6) cls10_2 = 'Văn - Cô Vy'; // Chiều tiết 6 -> Bị chia sáng & chiều!
 
-      let cls11A1 = 'Tin học';
-      if (slotNum === 1) cls11A1 = 'Hóa - Thầy Nam'; // Tiết 1
-      else if (slotNum === 2) cls11A1 = 'Toán - Thầy Hải'; // Tiết 2
-      else if (slotNum === 3) cls11A1 = 'Hóa - Thầy Nam'; // Tiết 3 -> Loãng xương sáng!
-      else if (slotNum === 4 || slotNum === 5) cls11A1 = 'Văn - Cô Vy';
+      let cls11_1 = 'Tin học';
+      if (slotNum === 1) cls11_1 = 'Hóa - Thầy Nam'; // Tiết 1
+      else if (slotNum === 2) cls11_1 = 'Toán - Thầy Hải'; // Tiết 2
+      else if (slotNum === 3) cls11_1 = 'Hóa - Thầy Nam'; // Tiết 3 -> Loãng xương sáng!
+      else if (slotNum === 4 || slotNum === 5) cls11_1 = 'Văn - Cô Vy';
 
-      let cls11A2 = 'GDCD';
-      if (slotNum === 1) cls11A2 = 'Địa - Cô Tâm';
-      else if (slotNum === 2) cls11A2 = 'Sử - Cô Hương'; // Xung đột với 10A2 nếu Cô Hương dạy cả hai
-      else if (slotNum === 6 || slotNum === 7) cls11A2 = 'GDCD - Thầy Bình';
+      // 10.2 and 12.2 assignments:
+      let cls11_2 = 'GDCD';
+      let cls12_1 = 'Tin học - Cô Nhi';
+      let cls12_2 = 'Sinh hoạt';
+
+      if (dayName === 'Thứ 2') {
+        if (slotNum === 4) {
+          cls10_2 = 'Toán - Thầy Mịnh';
+          cls12_2 = 'Văn - Thầy Đ. Minh'; // Simultaneous collision for 10.2 & 12.2 on Monday Period 4!
+        } else if (slotNum === 1) {
+          cls11_2 = 'Địa - Cô Tâm';
+          cls12_2 = 'Anh - Cô Mai';
+        } else if (slotNum === 2) {
+          cls11_2 = 'Sử - Cô Hương';
+          cls12_2 = 'Hóa - Thầy Nam';
+        }
+      } else if (dayName === 'Thứ 4') {
+        if (slotNum === 2) {
+          cls10_2 = 'Lý - Thầy Đ. Minh';
+          cls12_2 = 'Sử - Thầy Mịnh'; // Simultaneous collision for 10.2 & 12.2 on Wednesday Period 2!
+        } else if (slotNum === 3) {
+          cls11_2 = 'Hóa - Thầy Nam';
+          cls12_2 = 'Toán - Thầy Hải';
+        }
+      } else if (dayName === 'Thứ 3') {
+        if (slotNum === 1) {
+          cls10_2 = 'Toán - Thầy Mịnh'; // Only 10.2 has Thầy Mịnh, 12.2 has Sinh -> No collision
+          cls12_2 = 'Sinh - Thầy Bình';
+        }
+      }
 
       let cls1A = slotNum <= 2 ? 'Toán - Cô Vy' : (slotNum <= 4 ? 'Tiếng Việt' : 'Mỹ thuật');
       let cls2A = slotNum === 1 ? 'Toán - Cô Vy' : (slotNum <= 3 ? 'Anh văn' : 'Âm nhạc');
@@ -291,7 +319,7 @@ export function generateSampleExcel(): void {
       data[rowIdx] = [
         '', '', '', '',
         `${dayName} - ${periodLabel}`, cls1A, cls2A, 'Toán - Thầy Hải', 'Địa - Cô Tâm', 'Mỹ thuật', // E to J (Tiểu học)
-        `${dayName} - ${periodLabel}`, cls10A1, cls10A2, cls11A1, cls11A2, 'Tin học - Cô Nhi', 'Sinh - Thầy Bình', 'GDCD', 'Địa', 'Sử', 'QPAN', 'Sinh hoạt' // K to V (THPT)
+        `${dayName} - ${periodLabel}`, cls10A1, cls10_2, cls11_1, cls11_2, cls12_1, cls12_2, 'Lớp 10B1', 'Lớp 10B2', 'Lớp 11B1', 'Lớp 11B2', 'Lớp 12B1' // K to V (THPT)
       ];
     }
   };
@@ -764,4 +792,284 @@ export function detectSplitPeriods(
   });
 
   return issues;
+}
+
+/**
+ * Flexible class name matching:
+ * E.g. query "11.2" matches "11.2", "Lớp 11.2", "11.2 TN", "11.2 XH", "11/2", "11A2"
+ */
+export function matchClassFlexible(query: string, header: string): boolean {
+  if (!query || !header) return false;
+  const q = query.trim().toLowerCase();
+  const h = header.trim().toLowerCase();
+
+  // Direct include
+  if (h.includes(q)) return true;
+
+  // Normalized (strip spaces, dots, slashes, dashes)
+  const qNorm = q.replace(/[\s\._\-\/]+/g, '');
+  const hNorm = h.replace(/[\s\._\-\/]+/g, '');
+  if (!qNorm || !hNorm) return false;
+
+  if (hNorm === qNorm) return true;
+  if (hNorm.startsWith(qNorm) || hNorm.startsWith('lop' + qNorm)) return true;
+
+  // Grade & Section matching: e.g. "10.2" matches "10.2", "10A2", "10B2", "10/2", "10-2", "Lớp 10A2"
+  const parts = q.split(/[\.\/\-_\s]+/);
+  if (parts.length === 2 && /^\d+$/.test(parts[0]) && /^\d+$/.test(parts[1])) {
+    const grade = parts[0];
+    const section = parts[1];
+    const classNumPattern = new RegExp(`(^|[^0-9])${grade}[a-z\\.\\/\\-_\\s]*${section}([^0-9]|$)`, 'i');
+    if (classNumPattern.test(h)) return true;
+  }
+
+  // Pattern matching: e.g. "10.2" matching "10.2", "10/2", "10-2"
+  const dotPattern = q.replace(/\./g, '[\\.\\/\\-_\\s]?');
+  const regex = new RegExp(`(^|[^0-9])${dotPattern}([^0-9]|$)`, 'i');
+  return regex.test(h);
+}
+
+/**
+ * Flexible teacher name matching:
+ * Matches "Thầy Mịnh" vs "Thầy Đ. Minh", handling abbreviation, title, and diacritics
+ */
+export function matchTeacherFlexible(query: string, candidate: string): { matches: boolean; label: string } {
+  if (!query || !candidate) return { matches: false, label: '' };
+
+  const q = normalizeTeacherName(query).toLowerCase().replace(/thầy|cô/gi, '').trim();
+  const c = normalizeTeacherName(candidate).toLowerCase().replace(/thầy|cô/gi, '').trim();
+
+  if (!q || !c) return { matches: false, label: '' };
+
+  // Check if query targets "Đ. Minh" / "Đoàn Minh"
+  const isQueryDMinh = q.includes('đ.') || q.includes('đ ') || q.includes('đoàn') || q.includes('đặng') || q.includes('đinh') || q.includes('d.');
+  const isCandidateDMinh = c.includes('đ.') || c.includes('đ ') || c.includes('đoàn') || c.includes('đặng') || c.includes('đinh') || c.includes('d.');
+
+  if (isQueryDMinh) {
+    if (isCandidateDMinh && (c.includes('minh') || c.includes('mịnh'))) {
+      return { matches: true, label: 'Thầy Đ. Minh' };
+    }
+    return { matches: false, label: '' };
+  }
+
+  // Check if query targets "Thầy Mịnh" (or Minh without Đ)
+  const isQueryMinhOrMinh = q.includes('mịnh') || q.includes('minh');
+  if (isQueryMinhOrMinh && !isQueryDMinh) {
+    // If candidate has "Đ." then it is Thầy Đ. Minh, not Thầy Mịnh!
+    if (isCandidateDMinh) return { matches: false, label: '' };
+    if (c.includes('mịnh') || c.includes('minh')) {
+      return { matches: true, label: 'Thầy Mịnh' };
+    }
+  }
+
+  // Fallback: substring matching
+  if (c.includes(q) || q.includes(c)) {
+    return { matches: true, label: query };
+  }
+
+  return { matches: false, label: '' };
+}
+
+/**
+ * Detects whether Class 1 and Class 2 have simultaneous teaching sessions with Teacher 1 and Teacher 2:
+ * "Cùng 1 thời điểm 2 lớp có học 2 thầy cùng lúc không"
+ */
+export function detectSimultaneousTeaching(
+  rows: string[][],
+  colMappings: ColumnMapping[],
+  settings: ExtractionSettings,
+  config: SimultaneousCheckConfig = {
+    classQuery1: '10.2',
+    classQuery2: '12.2',
+    teacherQuery1: 'Thầy Mịnh',
+    teacherQuery2: 'Thầy Đ. Minh'
+  },
+  profile?: 'THPT' | 'TieuHoc' | 'All'
+): SimultaneousMatch[] {
+  const matches: SimultaneousMatch[] = [];
+
+  const dayCols = colMappings.filter(c => c.role === 'day');
+  const periodCols = colMappings.filter(c => c.role === 'period');
+  const classCols = colMappings.filter(c => c.role === 'class');
+
+  // Filter columns matching classQuery1 and classQuery2
+  const classCols1 = classCols.filter(c => matchClassFlexible(config.classQuery1, c.header));
+  const classCols2 = classCols.filter(c => matchClassFlexible(config.classQuery2, c.header));
+
+  if (classCols1.length === 0 || classCols2.length === 0) {
+    return [];
+  }
+
+  let lastSeenDay = 'Chưa xác định';
+  const dayRowCounters = new Map<string, number>();
+
+  rows.forEach((row, rowIndex) => {
+    // Determine Day
+    let day = '';
+    if (dayCols.length > 0) {
+      for (const dCol of dayCols) {
+        const val = row[dCol.index];
+        if (val && String(val).trim()) {
+          const dClean = String(val).trim();
+          if (dClean.toLowerCase().includes('thứ') || dClean.toLowerCase().includes('chủ nhật')) {
+            day = dClean;
+            lastSeenDay = day;
+            break;
+          }
+        }
+      }
+      if (!day) day = lastSeenDay;
+    } else {
+      if (profile === 'THPT' || profile === 'TieuHoc') {
+        const rowNum = rowIndex + 6;
+        if (rowNum >= 10 && rowNum <= 24) day = 'Thứ 2';
+        else if (rowNum >= 28 && rowNum <= 43) day = 'Thứ 3';
+        else if (rowNum >= 47 && rowNum <= 62) day = 'Thứ 4';
+        else if (rowNum >= 66 && rowNum <= 81) day = 'Thứ 5';
+        else if (rowNum >= 85 && rowNum <= 100) day = 'Thứ 6';
+        else day = 'Nghỉ/Trống';
+      } else {
+        day = lastSeenDay;
+      }
+    }
+
+    if ((profile === 'THPT' || profile === 'TieuHoc') && day === 'Nghỉ/Trống') {
+      return;
+    }
+
+    const currentDayRow = dayRowCounters.get(day) || 0;
+    dayRowCounters.set(day, currentDayRow + 1);
+
+    // Determine Period & Session
+    let periodText = '';
+    for (const pCol of periodCols) {
+      const cellVal = row[pCol.index];
+      if (cellVal && String(cellVal).trim()) {
+        periodText = String(cellVal).trim();
+        break;
+      }
+    }
+
+    const { session, displayName } = parsePeriodInfo(
+      periodText,
+      currentDayRow,
+      rowIndex,
+      profile
+    );
+
+    const periodDisplay = periodText || displayName;
+
+    // Check Class 1 teachers in this row
+    const class1Found: {
+      className: string;
+      teacher: string;
+      subject?: string;
+      originalValue: string;
+      matchedQuery: string;
+    }[] = [];
+
+    for (const col of classCols1) {
+      const cellVal = row[col.index];
+      const extracted = extractTeacher(cellVal, settings);
+      if (!extracted || !extracted.teacherName) continue;
+
+      const m1 = matchTeacherFlexible(config.teacherQuery1, extracted.teacherName);
+      const m2 = matchTeacherFlexible(config.teacherQuery2, extracted.teacherName);
+
+      if (m1.matches) {
+        class1Found.push({
+          className: col.header,
+          teacher: extracted.teacherName,
+          subject: extracted.subjectName,
+          originalValue: extracted.originalValue,
+          matchedQuery: m1.label || config.teacherQuery1
+        });
+      } else if (m2.matches) {
+        class1Found.push({
+          className: col.header,
+          teacher: extracted.teacherName,
+          subject: extracted.subjectName,
+          originalValue: extracted.originalValue,
+          matchedQuery: m2.label || config.teacherQuery2
+        });
+      }
+    }
+
+    // Check Class 2 teachers in this row
+    const class2Found: {
+      className: string;
+      teacher: string;
+      subject?: string;
+      originalValue: string;
+      matchedQuery: string;
+    }[] = [];
+
+    for (const col of classCols2) {
+      const cellVal = row[col.index];
+      const extracted = extractTeacher(cellVal, settings);
+      if (!extracted || !extracted.teacherName) continue;
+
+      const m1 = matchTeacherFlexible(config.teacherQuery1, extracted.teacherName);
+      const m2 = matchTeacherFlexible(config.teacherQuery2, extracted.teacherName);
+
+      if (m1.matches) {
+        class2Found.push({
+          className: col.header,
+          teacher: extracted.teacherName,
+          subject: extracted.subjectName,
+          originalValue: extracted.originalValue,
+          matchedQuery: m1.label || config.teacherQuery1
+        });
+      } else if (m2.matches) {
+        class2Found.push({
+          className: col.header,
+          teacher: extracted.teacherName,
+          subject: extracted.subjectName,
+          originalValue: extracted.originalValue,
+          matchedQuery: m2.label || config.teacherQuery2
+        });
+      }
+    }
+
+    // If BOTH class 1 and class 2 have one of the target teachers at this same slot:
+    if (class1Found.length > 0 && class2Found.length > 0) {
+      class1Found.forEach(c1 => {
+        class2Found.forEach(c2 => {
+          const isSameTeacher = normalizeTeacherName(c1.teacher) === normalizeTeacherName(c2.teacher);
+          const type: 'diff_teachers' | 'same_teacher' = isSameTeacher ? 'same_teacher' : 'diff_teachers';
+
+          let description = '';
+          if (isSameTeacher) {
+            description = `Cùng thời điểm: Cả 2 lớp (${c1.className} và ${c2.className}) cùng học ${c1.teacher}!`;
+          } else {
+            description = `Cùng thời điểm: Lớp ${c1.className} học ${c1.teacher} và lớp ${c2.className} học ${c2.teacher}!`;
+          }
+
+          matches.push({
+            id: `sim-${day}-${rowIndex}-${c1.className}-${c2.className}`,
+            day,
+            period: periodDisplay,
+            session,
+            rowIndex,
+            class1: {
+              className: c1.className,
+              teacher: c1.teacher,
+              subject: c1.subject,
+              originalValue: c1.originalValue
+            },
+            class2: {
+              className: c2.className,
+              teacher: c2.teacher,
+              subject: c2.subject,
+              originalValue: c2.originalValue
+            },
+            type,
+            description
+          });
+        });
+      });
+    }
+  });
+
+  return matches;
 }

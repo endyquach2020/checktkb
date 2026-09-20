@@ -1,6 +1,6 @@
 {
   "name": "Kiểm Tra Trùng Lịch Thời Khóa Biểu",
-  "description": "Ứng dụng tự động rà soát trùng lịch dạy của giáo viên từ file Excel thời khóa biểu với cấu trúc linh hoạt và tùy chỉnh lớp ghép song song.",
+  "description": "Ứng dụng tự động rà soát trùng lịch dạy, kiểm tra tiết bị chia và quản lý các ràng buộc thời khóa biểu tùy chỉnh từ file Excel.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
