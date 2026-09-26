@@ -869,30 +869,6 @@ export default function App() {
                 {/* BƯỚC 2: TẢI FILE EXCEL LÊN ĐỂ KIỂM TRA */}
                 {uploadTab === 'upload_file' && (
                   <div className="space-y-6">
-                    {/* Banner hiển thị số ràng buộc đã nạp */}
-                    <div className="bg-indigo-50/90 border border-indigo-200/80 rounded-2xl p-4.5 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs shadow-xs">
-                      <div className="flex items-center gap-3">
-                        <div className="p-2.5 bg-indigo-600 text-white rounded-xl shadow-xs shrink-0">
-                          <ShieldCheck className="w-5 h-5" />
-                        </div>
-                        <div>
-                          <div className="font-extrabold text-indigo-950 text-sm">
-                            Đang áp dụng {constraints.filter(c => c.isActive).length} yêu cầu ràng buộc đã lưu
-                          </div>
-                          <div className="text-indigo-700 text-xs mt-0.5">
-                            Hệ thống sẽ đối soát thời khóa biểu với toàn bộ các quy tắc này ngay khi bạn nạp file.
-                          </div>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => setUploadTab('setup_constraints')}
-                        className="px-3.5 py-2 bg-white text-indigo-700 hover:bg-indigo-50 border border-indigo-200 rounded-xl font-bold transition-all text-xs cursor-pointer shadow-xs shrink-0 flex items-center gap-1.5"
-                      >
-                        <Settings2 className="w-3.5 h-3.5" />
-                        Xem / Thêm yêu cầu khác
-                      </button>
-                    </div>
-
                     {/* Cấu hình cấp học rà soát */}
                     <div className="bg-white rounded-2xl border border-slate-200/50 p-5 shadow-sm space-y-4">
                       <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
@@ -974,15 +950,15 @@ export default function App() {
                       </div>
                     </div>
 
-                    {/* Drag and Drop area */}
+                    {/* Drag and Drop area - Đơn giản và nhỏ gọn */}
                     <div 
                       onDragOver={handleDragOver}
                       onDragLeave={handleDragLeave}
                       onDrop={handleDrop}
-                      className={`bg-white border-2 border-dashed rounded-2xl p-10 text-center transition-all flex flex-col items-center justify-center min-h-[340px] cursor-pointer group shadow-sm ${
+                      className={`bg-white border-2 border-dashed rounded-xl py-6 px-4 text-center transition-all flex flex-col items-center justify-center cursor-pointer group shadow-xs ${
                         isDragging 
-                          ? 'border-teal-500 bg-teal-50/20 ring-4 ring-teal-500/5 shadow-teal-100' 
-                          : 'border-slate-200 hover:border-teal-400 hover:bg-slate-50/30'
+                          ? 'border-teal-500 bg-teal-50/30 ring-4 ring-teal-500/10' 
+                          : 'border-slate-300 hover:border-teal-500 hover:bg-slate-50/60'
                       }`}
                       onClick={() => fileInputRef.current?.click()}
                       id="drag-drop-zone"
@@ -994,27 +970,17 @@ export default function App() {
                         accept=".xlsx, .xls"
                         className="hidden"
                       />
-                      <div className={`p-4 bg-slate-50 text-slate-400 rounded-xl mb-4 transition-all duration-300 ${
-                        isDragging ? 'bg-teal-100 text-teal-600 scale-105 shadow-sm' : 'group-hover:bg-teal-50 group-hover:text-teal-600 group-hover:scale-105'
+                      <div className={`p-2.5 bg-teal-50 text-teal-600 rounded-xl mb-2 transition-transform duration-200 ${
+                        isDragging ? 'bg-teal-100 scale-110' : 'group-hover:scale-105'
                       }`}>
-                        <Upload className="w-8 h-8" />
+                        <Upload className="w-5 h-5" />
                       </div>
-                      <h3 className="text-base font-bold text-slate-800 font-display">Tải lên tệp Excel thời khóa biểu</h3>
-                      <p className="text-xs text-slate-500 mt-1 max-w-sm leading-relaxed">
-                        Kéo thả tệp tin <strong className="text-slate-700">.xlsx</strong> hoặc <strong className="text-slate-700">.xls</strong> vào đây, hoặc click để chọn từ thiết bị của bạn.
+                      <div className="text-sm font-bold text-slate-800">
+                        Kéo thả tệp Excel hoặc <span className="text-teal-600 underline underline-offset-2">bấm vào đây để chọn tệp</span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-1">
+                        Hỗ trợ định dạng .xlsx, .xls
                       </p>
-
-                      <div className="flex flex-wrap items-center justify-center gap-4 mt-6 text-[11px] text-slate-400 font-bold uppercase tracking-wider">
-                        <span className="flex items-center gap-1 text-slate-500">
-                          <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span> Đối chiếu {constraints.filter(c => c.isActive).length} yêu cầu
-                        </span>
-                        <span className="flex items-center gap-1 text-slate-500">
-                          <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span> Nhận diện tự động
-                        </span>
-                        <span className="flex items-center gap-1 text-slate-500">
-                          <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span> Cấu hình lớp ghép
-                        </span>
-                      </div>
                     </div>
 
                     {/* Instructions card */}
