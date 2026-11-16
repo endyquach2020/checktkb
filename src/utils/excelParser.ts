@@ -217,14 +217,144 @@ export function detectConflicts(
           day,
           period,
           teacher: displayTeacherName,
+          rowIndex,
           classes: classesList,
-          conflictPairs
+          conflictPairs,
+          suggestions: []
         });
       }
     });
   }
 
-  return conflicts;
+  return conflicts.map(conflict => ({
+    ...conflict,
+    suggestions: findConflictRescheduleSuggestions(
+      rows,
+      mappings,
+      extractionSettings,
+      conflict,
+      profile
+    )
+  }));
+}
+
+function findConflictRescheduleSuggestions(
+  rows: string[][],
+  mappings: ColumnMapping[],
+  extractionSettings: ExtractionSettings,
+  conflict: TeacherConflict,
+  profile?: 'THPT' | 'TieuHoc' | 'All'
+): TeacherConflict['suggestions'] {
+  const dayCol = mappings.find(mapping => mapping.role === 'day');
+  const periodCol = mappings.find(mapping => mapping.role === 'period');
+  const classCols = mappings.filter(mapping => mapping.role === 'class');
+  const conflictingTeacher = normalizeTeacherName(conflict.teacher);
+  const dayRowCounters = new Map<string, number>();
+  const candidates: Array<{ rowIndex: number; day: string; period: string }> = [];
+  let lastSeenDay = 'Chưa xác định';
+
+  rows.forEach((row, rowIndex) => {
+    if (!row || row.length === 0) return;
+
+    let day = 'Chưa xác định';
+    if (dayCol) {
+      const cellValue = row[dayCol.index];
+      if (cellValue && String(cellValue).trim()) {
+        day = String(cellValue).trim();
+        lastSeenDay = day;
+      } else {
+        day = lastSeenDay;
+      }
+    } else if (profile === 'THPT' || profile === 'TieuHoc') {
+      const rowNum = rowIndex + 6;
+      if (rowNum >= 10 && rowNum <= 24) day = 'Thứ 2';
+      else if (rowNum >= 28 && rowNum <= 43) day = 'Thứ 3';
+      else if (rowNum >= 47 && rowNum <= 62) day = 'Thứ 4';
+      else if (rowNum >= 66 && rowNum <= 81) day = 'Thứ 5';
+      else if (rowNum >= 85 && rowNum <= 100) day = 'Thứ 6';
+      else day = 'Nghỉ/Trống';
+    } else {
+      day = lastSeenDay;
+    }
+
+    if (day === 'Nghỉ/Trống' || day === 'Chưa xác định') return;
+
+    const dayRowIndex = dayRowCounters.get(day) || 0;
+    dayRowCounters.set(day, dayRowIndex + 1);
+    const rawPeriod = periodCol && row[periodCol.index]
+      ? String(row[periodCol.index]).trim()
+      : '';
+    if (
+      profile === 'All' &&
+      (!rawPeriod || /nghỉ|trống|break/i.test(rawPeriod))
+    ) {
+      return;
+    }
+    const periodInfo = parsePeriodInfo(rawPeriod, dayRowIndex, rowIndex, profile);
+    if (/nghỉ|trống|break/i.test(rawPeriod)) return;
+    candidates.push({
+      rowIndex,
+      day,
+      period: rawPeriod || periodInfo.displayName
+    });
+  });
+
+  const classColumns = conflict.classes
+    .map(className => classCols.find(column => column.header === className))
+    .filter((column): column is ColumnMapping => Boolean(column));
+  const availableByClass = classColumns.map(column => ({
+    className: column.header,
+    slots: candidates.filter(candidate => {
+      if (candidate.rowIndex === conflict.rowIndex) return false;
+      const row = rows[candidate.rowIndex];
+      if (row[column.index] && String(row[column.index]).trim()) return false;
+
+      return !classCols.some(classColumn => {
+        const teacherInfo = extractTeacher(row[classColumn.index], extractionSettings);
+        return teacherInfo &&
+          normalizeTeacherName(teacherInfo.teacherName) === conflictingTeacher;
+      });
+    })
+  }));
+
+  const suggestions: TeacherConflict['suggestions'] = [];
+  const usedSlots = new Set<string>();
+  const isSameDay = (day: string) => day.trim().toLowerCase() === conflict.day.trim().toLowerCase();
+  const byPreference = (a: (typeof candidates)[number], b: (typeof candidates)[number]) =>
+    Number(isSameDay(b.day)) - Number(isSameDay(a.day)) || a.rowIndex - b.rowIndex;
+  const slotKey = (candidate: (typeof candidates)[number]) =>
+    `${candidate.day.trim().toLowerCase()}__${candidate.period.trim().toLowerCase()}`;
+
+  for (const available of availableByClass) {
+    const candidate = available.slots.sort(byPreference).find(slot => !usedSlots.has(slotKey(slot)));
+    if (!candidate) continue;
+    usedSlots.add(slotKey(candidate));
+    suggestions.push({
+      className: available.className,
+      day: candidate.day,
+      period: candidate.period
+    });
+  }
+
+  if (suggestions.length < 3) {
+    const remaining = availableByClass.flatMap(available =>
+      available.slots.map(slot => ({ ...slot, className: available.className }))
+    ).sort(byPreference);
+
+    for (const candidate of remaining) {
+      const key = slotKey(candidate);
+      if (usedSlots.has(key)) continue;
+      usedSlots.add(key);
+      suggestions.push({
+        className: candidate.className,
+        day: candidate.day,
+        period: candidate.period
+      });
+      if (suggestions.length === 3) break;
+    }
+  }
+
+  return suggestions;
 }
 
 /**

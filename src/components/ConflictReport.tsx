@@ -654,7 +654,7 @@ export default function ConflictReport({
                     Danh sách chi tiết cảnh báo trùng lịch ({filteredConflicts.length} / {conflicts.length})
                   </h3>
                   <p className="text-xs text-slate-400 font-medium mt-0.5">
-                    Các tiết học có cùng 1 giáo viên phụ trách ở nhiều lớp khác nhau tại cùng một thời điểm.
+                    Các tiết học có cùng 1 giáo viên phụ trách ở nhiều lớp khác nhau tại cùng một thời điểm. Gợi ý dựa trên tiết trống của lớp và giáo viên, không tự sửa file Excel và chưa kiểm tra các ràng buộc khác.
                   </p>
                 </div>
 
@@ -718,7 +718,7 @@ export default function ConflictReport({
                         <th className="px-4 py-3 w-36">Tiết / Khung giờ</th>
                         <th className="px-4 py-3 w-48">Tên Giáo Viên bị trùng</th>
                         <th className="px-4 py-3">Các Lớp bị trùng</th>
-                        <th className="px-4 py-3">Chi tiết các cặp trùng thực tế</th>
+                        <th className="px-4 py-3">Chi tiết trùng & gợi ý xếp</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 bg-white">
@@ -783,6 +783,27 @@ export default function ConflictReport({
                                     </span>
                                   );
                                 })}
+                                <div className="basis-full mt-2 space-y-1.5">
+                                  <div className="text-[10px] font-extrabold uppercase tracking-wide text-teal-700">
+                                    Gợi ý chuyển tiết
+                                  </div>
+                                  {c.suggestions.length > 0 ? c.suggestions.map((suggestion, idx) => (
+                                    <div
+                                      key={`${suggestion.className}-${suggestion.day}-${suggestion.period}-${idx}`}
+                                      className="flex flex-wrap items-center gap-1 text-[11px] font-semibold text-slate-600"
+                                    >
+                                      <Sparkles className="w-3 h-3 text-teal-500 shrink-0" />
+                                      <span>Chuyển {formatClassName(suggestion.className)} sang</span>
+                                      <span className="rounded bg-teal-50 px-1.5 py-0.5 text-teal-700">
+                                        {formatDay(suggestion.day)} · {suggestion.period}
+                                      </span>
+                                    </div>
+                                  )) : (
+                                    <div className="text-[11px] text-slate-400 italic">
+                                      Chưa tìm thấy tiết trống phù hợp cho giáo viên và lớp.
+                                    </div>
+                                  )}
+                                </div>
                               </div>
                             </td>
                           </tr>

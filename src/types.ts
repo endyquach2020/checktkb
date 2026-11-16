@@ -32,8 +32,16 @@ export interface TeacherConflict {
   day: string;
   period: string;
   teacher: string;
+  rowIndex: number;
   classes: string[]; // List of classes the teacher is teaching in this slot
   conflictPairs: [string, string][]; // List of actual conflicting class pairs (excluding exempted ones)
+  suggestions: ConflictRescheduleSuggestion[];
+}
+
+export interface ConflictRescheduleSuggestion {
+  className: string;
+  day: string;
+  period: string;
 }
 
 export type DaySession = 'Sáng' | 'Chiều' | 'Khác';
